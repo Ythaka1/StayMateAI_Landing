@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+:root {
+  --paper: #f3f1ec;
+  --paper-2: #fbfaf7;
+  --ink: #15171b;
+  --felt: #1e3b31;
+  --brass: #a07e45;
+  --muted: #6c6860;
+  /* The darkness the card sits in. Must match the three.js clear colour
+     (NIGHT in components/pivot/scene.ts) so the intro hands off cleanly. */
+  --night: #0b0c0e;
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-paper-2: var(--paper-2);
+  --color-ink: var(--ink);
+  --color-felt: var(--felt);
+  --color-brass: var(--brass);
+  --color-muted: var(--muted);
+  --color-night: var(--night);
+  --font-display: var(--font-fraunces);
+  --font-body: var(--font-archivo);
+}
+
+html {
+  background: var(--paper);
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-archivo), system-ui, sans-serif;
+}
+
+/* Lenis recommends this on the root while smooth scroll is active. */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
