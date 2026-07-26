@@ -107,18 +107,35 @@ export function makeGrainTexture(size = 256): THREE.Texture {
 }
 
 /**
+ * The display face, as next/font named it. The font is loaded by the document,
+ * not by canvas, so this reads the family off the CSS variable the layout
+ * sets. Falls back to a generic serif if the variable is missing.
+ */
+function displayFamily(): string {
+  const v = getComputedStyle(document.documentElement)
+    .getPropertyValue("--font-fraunces")
+    .trim();
+  return v ? `${v}, serif` : "serif";
+}
+
+/**
  * The printed layer of the tent card: QR-like block upper-centre, a brass
  * rule, the wordmark, one muted line. Canvas aspect matches the card
  * (3:4) so card-space squares stay square.
+ *
+ * The card is on screen for two full beats before the seam, so the wordmark
+ * is set in the real display face. Webfonts are not available synchronously
+ * and there is no loading screen in this site, so the texture is drawn
+ * immediately with whatever is resolved and redrawn in place once the font
+ * arrives — `onRedraw` lets the scene mark itself dirty when that happens.
  */
-export function makePrintTexture(): THREE.Texture {
+export function makePrintTexture(onRedraw?: () => void): THREE.Texture {
   const W = 768;
   const H = 1024;
   const canvas = document.createElement("canvas");
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext("2d")!;
-  ctx.clearRect(0, 0, W, H);
 
   const INK = "#15171b";
   const BRASS = "#a07e45";
@@ -134,53 +151,78 @@ export function makePrintTexture(): THREE.Texture {
   const qrX = (W - qrSize) / 2;
   const qrY = 92;
   const m = qrSize / modules;
-  const rand = mulberry32(214);
 
-  const finder = (cx: number, cy: number) => {
+  const draw = () => {
+    ctx.clearRect(0, 0, W, H);
+    const rand = mulberry32(214);
+
+    const finder = (cx: number, cy: number) => {
+      ctx.fillStyle = INK;
+      ctx.fillRect(qrX + cx * m, qrY + cy * m, 7 * m, 7 * m);
+      ctx.clearRect(qrX + (cx + 1) * m, qrY + (cy + 1) * m, 5 * m, 5 * m);
+      ctx.fillStyle = INK;
+      ctx.fillRect(qrX + (cx + 2) * m, qrY + (cy + 2) * m, 3 * m, 3 * m);
+    };
+
+    const inFinder = (x: number, y: number) =>
+      (x < 8 && y < 8) ||
+      (x >= modules - 8 && y < 8) ||
+      (x < 8 && y >= modules - 8);
+
     ctx.fillStyle = INK;
-    ctx.fillRect(qrX + cx * m, qrY + cy * m, 7 * m, 7 * m);
-    ctx.fillStyle = "rgba(0,0,0,0)";
-    ctx.clearRect(qrX + (cx + 1) * m, qrY + (cy + 1) * m, 5 * m, 5 * m);
-    ctx.fillStyle = INK;
-    ctx.fillRect(qrX + (cx + 2) * m, qrY + (cy + 2) * m, 3 * m, 3 * m);
-  };
-
-  const inFinder = (x: number, y: number) =>
-    (x < 8 && y < 8) || (x >= modules - 8 && y < 8) || (x < 8 && y >= modules - 8);
-
-  ctx.fillStyle = INK;
-  for (let y = 0; y < modules; y++) {
-    for (let x = 0; x < modules; x++) {
-      if (inFinder(x, y)) continue;
-      if (rand() < 0.44) {
-        ctx.fillRect(qrX + x * m + 0.5, qrY + y * m + 0.5, m - 1, m - 1);
+    for (let y = 0; y < modules; y++) {
+      for (let x = 0; x < modules; x++) {
+        if (inFinder(x, y)) continue;
+        if (rand() < 0.44) {
+          ctx.fillRect(qrX + x * m + 0.5, qrY + y * m + 0.5, m - 1, m - 1);
+        }
       }
     }
-  }
-  finder(0, 0);
-  finder(modules - 7, 0);
-  finder(0, modules - 7);
+    finder(0, 0);
+    finder(modules - 7, 0);
+    finder(0, modules - 7);
 
-  // Brass rule under the QR.
-  ctx.fillStyle = BRASS;
-  ctx.fillRect(W / 2 - 60, qrY + qrSize + 78, 120, 3);
+    // Brass rule under the QR.
+    ctx.fillStyle = BRASS;
+    ctx.fillRect(W / 2 - 60, qrY + qrSize + 78, 120, 3);
 
-  // Wordmark. Georgia stands in for the display face inside the texture —
-  // canvas can't reach next/font, and this whole layer is behind the
-  // SWAP SEAM anyway.
-  ctx.fillStyle = INK;
-  ctx.textAlign = "center";
-  ctx.font = "600 58px Georgia, serif";
-  ctx.fillText("S T A Y M A T E", W / 2, qrY + qrSize + 168);
+    const family = displayFamily();
+    ctx.textAlign = "center";
 
-  ctx.fillStyle = MUTED;
-  ctx.font = "28px Georgia, serif";
-  ctx.fillText("Scan for your concierge", W / 2, qrY + qrSize + 224);
+    ctx.fillStyle = INK;
+    ctx.font = `600 54px ${family}`;
+    ctx.fillText("S T A Y M A T E", W / 2, qrY + qrSize + 168);
+
+    ctx.fillStyle = MUTED;
+    ctx.font = `26px ${family}`;
+    ctx.fillText("Scan for your concierge", W / 2, qrY + qrSize + 224);
+  };
+
+  draw();
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.minFilter = THREE.LinearMipmapLinearFilter;
   tex.magFilter = THREE.LinearFilter;
   tex.generateMipmaps = true;
   tex.needsUpdate = true;
+
+  // Redraw once the display face has actually loaded. No gate on first paint.
+  if (typeof document !== "undefined" && document.fonts) {
+    const family = displayFamily();
+    Promise.all([
+      document.fonts.load(`600 54px ${family}`),
+      document.fonts.load(`26px ${family}`),
+    ])
+      .then(() => document.fonts.ready)
+      .then(() => {
+        draw();
+        tex.needsUpdate = true;
+        onRedraw?.();
+      })
+      .catch(() => {
+        /* keep the fallback rendering */
+      });
+  }
+
   return tex;
 }

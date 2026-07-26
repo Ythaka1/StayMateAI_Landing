@@ -5,8 +5,14 @@ import type { ReactNode } from "react";
 
 /*
  * The four horizontal panels — the guest journey, seen as the app.
- * Placeholder content this pass: flat cards, real copy, no images.
- * These get replaced later; the shell (Panel) is what's load-bearing.
+ *
+ * A spa booking rather than dinner: it reads the same in every market, and it
+ * ends on the same confirmation. Nothing here names a country, a cuisine or a
+ * currency — the amount is shown bare, because the property sets its own
+ * currency at runtime and that is not a decision this site should make.
+ *
+ * Placeholder content this pass: flat cards, real copy, no images. These get
+ * replaced later; the shell (Panel) is what's load-bearing.
  */
 
 const rise = {
@@ -72,9 +78,9 @@ export function Panel({
 export function PanelQuestion() {
   return (
     <>
-      <Eyebrow>Room 214 · 6:48pm</Eyebrow>
+      <Eyebrow>Room 214 · 9:12pm</Eyebrow>
       <h2 className="mt-5 font-display text-[clamp(1.9rem,7vw,2.75rem)] leading-[1.12] tracking-[-0.015em] text-ink">
-        “What’s good for dinner tonight?”
+        “Anywhere I can get a massage tonight?”
       </h2>
       <p className="mt-6 max-w-[22rem] font-body text-[0.9375rem] leading-relaxed text-muted">
         Typed four seconds after scanning the card on the desk. No app to
@@ -85,44 +91,25 @@ export function PanelQuestion() {
 }
 
 export function PanelAnswer() {
-  const dishes = [
-    {
-      name: "Swahili fish curry",
-      note: "Red snapper, coconut, tamarind. From the coast menu.",
-      price: "KES 1,850",
-    },
-    {
-      name: "Charcoal nyama choma",
-      note: "Goat ribs, kachumbari, ugali. About 25 minutes.",
-      price: "KES 2,400",
-    },
-  ];
   return (
     <>
       <Eyebrow>StayMate</Eyebrow>
       <p className="mt-5 font-display text-[clamp(1.25rem,4.6vw,1.6rem)] leading-snug text-ink">
-        Two things the kitchen is doing well tonight.
+        The spa has one slot left tonight.
       </p>
-      <ul className="mt-7 space-y-3">
-        {dishes.map((d) => (
-          <li
-            key={d.name}
-            className="rounded-xl border border-brass/20 bg-paper-2 p-4"
-          >
-            <div className="flex items-baseline justify-between gap-4">
-              <span className="font-body text-[0.9375rem] font-medium text-ink">
-                {d.name}
-              </span>
-              <span className="shrink-0 font-body text-sm font-semibold tabular-nums text-felt">
-                {d.price}
-              </span>
-            </div>
-            <p className="mt-1.5 font-body text-[0.8125rem] leading-relaxed text-muted">
-              {d.note}
-            </p>
-          </li>
-        ))}
-      </ul>
+      <div className="mt-7 rounded-xl border border-brass/20 bg-paper-2 p-5">
+        <p className="font-body text-[0.9375rem] font-medium text-ink">
+          Deep tissue, 60 minutes
+        </p>
+        <p className="mt-2 font-body text-[0.8125rem] leading-relaxed text-muted">
+          The one people book after a long flight — shoulders, neck and lower
+          back. Second floor, 7:30pm.
+        </p>
+      </div>
+      <p className="mt-5 font-body text-[0.8125rem] leading-relaxed text-muted">
+        It knew the spa was open, knew what was free, and answered in nine
+        seconds.
+      </p>
     </>
   );
 }
@@ -130,17 +117,17 @@ export function PanelAnswer() {
 export function PanelOffer() {
   return (
     <>
-      <Eyebrow>Because you landed at 4am</Eyebrow>
+      <Eyebrow>One tap</Eyebrow>
       <div className="mt-5 rounded-2xl border border-brass/20 bg-paper-2 p-5 sm:p-6">
         <h3 className="font-display text-[clamp(1.3rem,4.8vw,1.65rem)] leading-tight text-ink">
-          Deep tissue massage, 60 minutes
+          Deep tissue, 60 minutes
         </h3>
         <p className="mt-2 font-body text-[0.875rem] leading-relaxed text-muted">
-          Spa on the second floor. One slot left at 8:00pm, after dinner.
+          Tonight at 7:30pm, spa on the second floor.
         </p>
         <div className="mt-5 flex items-center justify-between gap-4">
           <span className="font-body text-lg font-semibold tabular-nums text-felt">
-            KES 4,500
+            4,500
           </span>
           <button
             type="button"
@@ -150,8 +137,9 @@ export function PanelOffer() {
           </button>
         </div>
       </div>
-      <p className="mt-4 font-body text-[0.8125rem] text-muted">
-        Charged to room 214. Nobody had to ask.
+      <p className="mt-4 font-body text-[0.8125rem] leading-relaxed text-muted">
+        Priced and charged in your property’s own currency. Straight onto the
+        room, with nobody at the desk to ask.
       </p>
     </>
   );
@@ -159,8 +147,8 @@ export function PanelOffer() {
 
 export function PanelConfirmation() {
   const rows = [
-    ["Table for two", "7:30pm"],
-    ["Massage, spa", "8:00pm"],
+    ["Deep tissue, 60 min", "7:30pm"],
+    ["Spa", "Second floor"],
     ["Room", "214"],
   ];
   return (

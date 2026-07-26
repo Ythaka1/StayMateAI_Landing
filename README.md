@@ -11,20 +11,35 @@ npm run dev
 
 ## What is built
 
-Pass one: the scaffold and **beat 3, the pivot** — the camera pushes into the
-card until the surface fills the frame, the frame becomes a phone screen,
-scrolling turns sideways through four panels of the guest journey, then turns
-back. The other five beats, the nav, the footer and the contact page are not
-built yet.
+**Beat 1 — darkness.** The card alone in near-black, a warm key from the upper
+left, a cool rim on the opposite edge, and a very slow Y rotation that stops on
+the user's first input and never restarts. It is the only autonomous motion in
+the site. There is no loading screen and no gate: scroll works from the first
+frame.
 
-Beats 1 and 2 are stubbed as camera positions only (`CAMERA_BEATS` in
-`components/pivot/scene.ts`).
+**Beat 2 — the descent.** Scroll brings the card down and slightly toward the
+camera until it lands. The desk is never modelled — it is a contact shadow that
+tightens as the card arrives, the cool rim dying, the key dropping lower and
+warmer, and a soft bounce from below. Copy fades in once the card is settled.
 
-## How the pivot works
+**Beat 3 — the pivot.** The camera pushes into the card until the surface fills
+the frame, the frame becomes a phone screen, scrolling turns sideways through
+four panels of the guest journey, then turns back.
 
-`components/pivot/timeline.ts` owns every scroll range as plain constants. One
-progress value (0–1 across a 500svh spacer) drives the camera, the cross-fade
-and the horizontal travel, so the canvas and the DOM layer cannot drift apart.
+Beats 4, 5 and 6, the nav, the footer and the contact page are not built yet.
+
+## One stage, one camera path
+
+All three beats share a single sticky section, a single canvas and a single
+camera path, so the camera never cuts from the top of the page to the end of
+the pivot. Beats 1 and 2 are expressed as offsets from `dollyAt(0)` — the
+pivot's own opening frame — that decay to exactly zero at `PIVOT.start`. There
+is no second path to drift out of sync with the first, and no camera number
+written down twice.
+
+`components/stage/timeline.ts` owns every scroll range as plain constants. One
+global progress value drives the camera, the copy layers, the cross-fade and
+the horizontal travel.
 
 The handoff is a colour-matched cut on a flat field, not a geometry morph. The
 camera terminates on blank card stock beside the QR block; at maximum push-in
@@ -41,13 +56,30 @@ Three details the seam depends on:
 - the terminal camera distance is derived from the width of the blank band, so
   the dolly ends exactly when the frame fills with stock on any aspect ratio.
 
+## Shader variants
+
+The fragment shader is compiled three ways and swapped per frame: `rich` (edge
+terms and, at ≥768px, the deboss chroma, plus the desk) for beats 1 and 2,
+`desk` for beat 3 while the card does not fill the frame, and `lean` — pass
+01's shader exactly — once it does.
+
+This is not premature: a runtime `if` on a uniform is not free. Measured here,
+an unused-but-present fresnel block cost a third of the frame time during the
+pivot, because the rasteriser evaluates both sides and masks. Compiling the
+dead code out is the only version of "off" that is actually off. All three are
+compiled at startup, so swapping never triggers a compile or a hitch.
+
 ## Swapping in real artwork
 
-`makePrintTexture()` in `components/pivot/textures.ts` is marked as the swap
+`makePrintTexture()` in `components/stage/textures.ts` is marked as the swap
 seam. Replace it with a loaded texture using the same full-card UV mapping and
 a transparent background; no camera code changes. `QR_LEFT_X` in `scene.ts`
 must match wherever the printed block's left edge lands, since the camera aims
 for the blank band beside it.
+
+The wordmark is set in the display face. Canvas cannot reach `next/font`
+synchronously, so the texture draws immediately with whatever is resolved and
+redraws in place once the font arrives — no gate on first paint.
 
 ## Accessibility
 

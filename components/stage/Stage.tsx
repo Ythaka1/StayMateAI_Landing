@@ -2,38 +2,48 @@
 
 import { useEffect, useRef, useState } from "react";
 import { MotionConfig } from "framer-motion";
-import { createCardScene, type CardScene } from "./scene";
+import { createCardScene } from "./scene";
 import { PANELS, Panel } from "./Panels";
+import { DarknessCopy, DescentCopy } from "./Copy";
 import {
   CANVAS_SLEEP_AT,
+  COPY_DARKNESS,
+  COPY_DESCENT,
   FADE,
   PANELS_TRAVEL,
   PANEL_COUNT,
+  STAGE_HEIGHT_VH,
+  band,
   clamp01,
+  pivotProgress,
   progressForPanel,
   within,
 } from "./timeline";
 import { getLenis } from "@/lib/lenis";
 
 /*
- * Beat 3 — the pivot.
+ * Beats 1, 2 and 3 — darkness, the descent, and the pivot.
  *
- * One sticky section inside a 500svh spacer. One progress value derived from
- * the spacer's rect drives the camera dolly, the cross-fade, and the
- * horizontal travel. Nothing here preventDefaults wheel or touch; the page
- * scrolls normally and only the visual is pinned.
+ * One sticky section inside one tall spacer, one canvas, one camera path. The
+ * camera never cuts from the top of the page to the end of the pivot, which
+ * is only true because there is a single path: beats 1 and 2 are offsets from
+ * the pivot dolly's own start that decay to zero (see cameraAt in scene.ts).
+ *
+ * Nothing here preventDefaults wheel or touch; the page scrolls normally and
+ * only the visual is pinned.
  *
  * Reduced motion is handled structurally in CSS (motion-reduce: variants),
- * not by swapping React trees — so there is no hydration flash and no
- * layout shift. In that path the canvas is never created and the four
- * panels are plain stacked sections.
+ * not by swapping React trees — so there is no hydration flash and no layout
+ * shift. In that path no WebGL context is created at all and the beats become
+ * plain stacked sections.
  */
-export default function Pivot() {
+export default function Stage() {
   const spacerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const darknessRef = useRef<HTMLDivElement>(null);
+  const descentRef = useRef<HTMLDivElement>(null);
   const layerRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
-  const sceneRef = useRef<CardScene | null>(null);
   const reducedRef = useRef(false);
 
   const [active, setActive] = useState(0);
@@ -42,22 +52,21 @@ export default function Pivot() {
   useEffect(() => {
     const spacer = spacerRef.current;
     const canvas = canvasRef.current;
+    const darkness = darknessRef.current;
+    const descent = descentRef.current;
     const layer = layerRef.current;
     const track = trackRef.current;
-    if (!spacer || !canvas || !layer || !track) return;
+    if (!spacer || !canvas || !darkness || !descent || !layer || !track) return;
 
-    const reducedQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
-    if (reducedQuery.matches) {
-      // No pin, no canvas at all. CSS has already laid the panels out as
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      // No pin, no canvas at all. CSS has already laid the beats out as
       // stacked static sections; make every panel's copy visible.
       reducedRef.current = true;
       setActive(-1);
       return;
     }
 
-    const isMobile = window.innerWidth < 768;
-    const scene = createCardScene(canvas, { isMobile });
-    sceneRef.current = scene;
+    const scene = createCardScene(canvas, { isMobile: window.innerWidth < 768 });
 
     let onScreen = false;
     let lastApplied = -1;
@@ -68,23 +77,58 @@ export default function Pivot() {
       if (w > 0 && h > 0) scene.setSize(w, h);
     };
 
+    /**
+     * Write an overlay's opacity only when it has actually changed. There are
+     * now four full-viewport layers over the canvas and writing all of them
+     * on every scroll event costs a style recalc per layer per frame, while
+     * three of the four are sitting at a flat 0 or 1 the whole time.
+     *
+     * Deliberately opacity only — not visibility or display. Hiding the panel
+     * layer would take it out of the tab order, and hiding the copy layers
+     * would take beats 1 and 2 out of the accessibility tree, where they are
+     * the only copy those beats have.
+     */
+    const opacities = new WeakMap<HTMLElement, number>();
+    const setLayerOpacity = (el: HTMLElement, v: number) => {
+      const q = Math.round(v * 500) / 500;
+      if (opacities.get(el) === q) return;
+      opacities.set(el, q);
+      el.style.opacity = String(q);
+    };
+
+    let lastTrack = -1;
+    let lastPointer = "";
+
     const apply = () => {
       const rect = spacer.getBoundingClientRect();
       const travel = rect.height - window.innerHeight;
-      const p = travel > 0 ? clamp01(-rect.top / travel) : 0;
-      if (p === lastApplied) return;
-      lastApplied = p;
+      const g = travel > 0 ? clamp01(-rect.top / travel) : 0;
+      if (g === lastApplied) return;
+      lastApplied = g;
 
-      scene.setProgress(p);
+      scene.setProgress(g);
 
-      // Cross-fade the DOM layer up over the canvas.
-      const fade = within(p, FADE);
-      layer.style.opacity = String(fade);
-      layer.style.pointerEvents = fade >= 1 ? "auto" : "none";
+      // Beats 1 and 2: copy.
+      setLayerOpacity(darkness, band(g, COPY_DARKNESS));
+      setLayerOpacity(descent, band(g, COPY_DESCENT));
+
+      // Beat 3: cross-fade the DOM phone layer up over the canvas.
+      const pp = pivotProgress(g);
+      const fade = within(pp, FADE);
+      setLayerOpacity(layer, fade);
+      const pointer = fade >= 1 ? "auto" : "none";
+      if (pointer !== lastPointer) {
+        lastPointer = pointer;
+        layer.style.pointerEvents = pointer;
+      }
 
       // Horizontal travel: one transform on one container.
-      const t = within(p, PANELS_TRAVEL);
-      track.style.transform = `translate3d(${-75 * t}%, 0, 0)`;
+      const t = within(pp, PANELS_TRAVEL);
+      const tx = Math.round(-75 * t * 1000) / 1000;
+      if (tx !== lastTrack) {
+        lastTrack = tx;
+        track.style.transform = `translate3d(${tx}%, 0, 0)`;
+      }
 
       const idx = Math.round(t * (PANEL_COUNT - 1));
       if (idx !== activeRef.current) {
@@ -94,9 +138,13 @@ export default function Pivot() {
 
       // Stop the RAF loop once the DOM layer is fully opaque; resume before
       // it starts fading back out. Never a mere opacity-0 canvas.
-      if (!onScreen || p >= CANVAS_SLEEP_AT) scene.stop();
+      if (!onScreen || pp >= CANVAS_SLEEP_AT) scene.stop();
       else scene.start();
     };
+
+    // The autonomous rotation in beat 1 ends on the user's first input and
+    // never restarts — from then on scroll owns the camera entirely.
+    const onFirstInput = () => scene.releaseIntro();
 
     // Passive listeners only. Lenis scrolls the document, so native scroll
     // events fire at frame rate during smooth scrolling.
@@ -120,15 +168,29 @@ export default function Pivot() {
     window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", onResize);
 
+    // A wheel or a touch that has not moved the page yet is still the user
+    // taking over, so the release does not wait for scroll to register.
+    const once = { passive: true, once: true } as const;
+    window.addEventListener("scroll", onFirstInput, once);
+    window.addEventListener("wheel", onFirstInput, once);
+    window.addEventListener("touchstart", onFirstInput, once);
+    window.addEventListener("keydown", onFirstInput, { once: true });
+
     applySize();
     apply();
+
+    // Restored mid-page: the intro was never the user's to see.
+    if (window.scrollY > 4) scene.releaseIntro();
 
     return () => {
       io.disconnect();
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onResize);
+      window.removeEventListener("scroll", onFirstInput);
+      window.removeEventListener("wheel", onFirstInput);
+      window.removeEventListener("touchstart", onFirstInput);
+      window.removeEventListener("keydown", onFirstInput);
       scene.dispose();
-      sceneRef.current = null;
     };
   }, []);
 
@@ -170,8 +232,9 @@ export default function Pivot() {
     <MotionConfig reducedMotion="user">
       <div
         ref={spacerRef}
-        className="relative h-[500svh] motion-reduce:h-auto"
-        data-beat="3-pivot"
+        className="relative motion-reduce:!h-auto"
+        style={{ height: `${STAGE_HEIGHT_VH}svh` }}
+        data-stage="beats-1-3"
       >
         {/* overflow-clip, not hidden: a hidden box is still a scroll
             container, so the browser can scrollLeft the track when focus
@@ -185,6 +248,9 @@ export default function Pivot() {
             aria-hidden="true"
             className="absolute inset-0 block h-full w-full motion-reduce:hidden"
           />
+
+          <DarknessCopy ref={darknessRef} />
+          <DescentCopy ref={descentRef} />
 
           {/* The phone layer. Same cream as the card stock — the seam is
               invisible because there is nothing at the seam. */}
