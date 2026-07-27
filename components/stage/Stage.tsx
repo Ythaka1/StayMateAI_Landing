@@ -2,9 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { MotionConfig } from "framer-motion";
-import { createCardScene } from "./scene";
+import { createCardScene, type CardScene } from "./scene";
 import { PANELS, Panel } from "./Panels";
 import { DarknessCopy, DescentCopy } from "./Copy";
+import DebugOverlay from "./DebugOverlay";
+import { debugEnabled, stageDebug } from "./debug";
 import {
   CANVAS_SLEEP_AT,
   COPY_DARKNESS,
@@ -58,7 +60,17 @@ export default function Stage() {
     const track = trackRef.current;
     if (!spacer || !canvas || !darkness || !descent || !layer || !track) return;
 
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    // TEMPORARY diagnostics (?debug=1). Remove with debug.ts.
+    const DEBUG = debugEnabled();
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
+    if (DEBUG) {
+      stageDebug.reducedMotion = reduced.matches ? "reduce" : "no-preference";
+      stageDebug.dpr = window.devicePixelRatio;
+      stageDebug.clientW = canvas.clientWidth;
+      stageDebug.clientH = canvas.clientHeight;
+    }
+
+    if (reduced.matches) {
       // No pin, no canvas at all. CSS has already laid the beats out as
       // stacked static sections; make every panel's copy visible.
       reducedRef.current = true;
@@ -66,7 +78,14 @@ export default function Stage() {
       return;
     }
 
-    const scene = createCardScene(canvas, { isMobile: window.innerWidth < 768 });
+    let scene: CardScene;
+    try {
+      scene = createCardScene(canvas, { isMobile: window.innerWidth < 768 });
+    } catch (err) {
+      // Without this the page just stays dark with nothing to read.
+      if (DEBUG) stageDebug.fatal = String(err instanceof Error ? err.stack : err);
+      return;
+    }
 
     let onScreen = false;
     let lastApplied = -1;
@@ -74,6 +93,10 @@ export default function Stage() {
     const applySize = () => {
       const w = canvas.clientWidth;
       const h = canvas.clientHeight;
+      if (DEBUG) {
+        stageDebug.clientW = w;
+        stageDebug.clientH = h;
+      }
       if (w > 0 && h > 0) scene.setSize(w, h);
     };
 
@@ -103,6 +126,13 @@ export default function Stage() {
       const rect = spacer.getBoundingClientRect();
       const travel = rect.height - window.innerHeight;
       const g = travel > 0 ? clamp01(-rect.top / travel) : 0;
+      if (DEBUG) {
+        stageDebug.progress = g;
+        stageDebug.scrollY = Math.round(window.scrollY);
+        stageDebug.spacerTop = Math.round(rect.top);
+        stageDebug.spacerH = Math.round(rect.height);
+        stageDebug.onScreen = onScreen;
+      }
       if (g === lastApplied) return;
       lastApplied = g;
 
@@ -148,7 +178,10 @@ export default function Stage() {
 
     // Passive listeners only. Lenis scrolls the document, so native scroll
     // events fire at frame rate during smooth scrolling.
-    const onScroll = () => apply();
+    const onScroll = () => {
+      if (DEBUG) stageDebug.scrollEvents++;
+      apply();
+    };
     const onResize = () => {
       applySize();
       lastApplied = -1;
@@ -230,6 +263,8 @@ export default function Stage() {
 
   return (
     <MotionConfig reducedMotion="user">
+      {/* TEMPORARY — renders only with ?debug=1. Remove with debug.ts. */}
+      <DebugOverlay />
       <div
         ref={spacerRef}
         className="relative motion-reduce:!h-auto"

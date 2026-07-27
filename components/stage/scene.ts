@@ -12,6 +12,7 @@ import {
   pivotProgress,
   within,
 } from "./timeline";
+import { debugEnabled, stageDebug } from "./debug";
 
 /*
  * One object, one plane, one draw call, across all three beats. The card is a
@@ -286,6 +287,32 @@ export function createCardScene(
   renderer.outputColorSpace = THREE.LinearSRGBColorSpace; // i.e. no encode
   renderer.setClearColor(new THREE.Color(NIGHT), 1);
 
+  // ── TEMPORARY diagnostics (?debug=1). Remove with debug.ts. ─────────────
+  const DEBUG = debugEnabled();
+  if (DEBUG) {
+    const gl = renderer.getContext();
+    stageDebug.contextType = Object.getPrototypeOf(gl)?.constructor?.name
+      ?? "unknown";
+    stageDebug.pixelRatio = renderer.getPixelRatio();
+    canvas.addEventListener("webglcontextlost", () => {
+      stageDebug.contextLost = true;
+    });
+    canvas.addEventListener("webglcontextrestored", () => {
+      stageDebug.contextLost = false;
+    });
+    // three swallows nothing here — this replaces its own console reporting
+    // with the full log, verbatim, so it can be read on a phone.
+    renderer.debug.onShaderError = (prog, glVs, glFs) => {
+      const c = renderer.getContext();
+      const parts = [
+        c.getProgramInfoLog(prog),
+        c.getShaderInfoLog(glVs),
+        c.getShaderInfoLog(glFs),
+      ].filter((s) => s && s.trim());
+      stageDebug.shaderError = parts.join("\n---\n") || "program link failed";
+    };
+  }
+
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(40, 1, 0.05, 30);
   const halfFovTan = Math.tan((camera.fov * Math.PI) / 360);
@@ -544,12 +571,24 @@ export function createCardScene(
           ? deskOnly
           : lean;
     if (mesh.material !== next) mesh.material = next;
+    if (DEBUG) {
+      stageDebug.variant =
+        next === rich ? "rich" : next === deskOnly ? "desk" : "lean";
+    }
   }
 
   function render(nowMs: number) {
     applyProgress(nowMs);
     renderer.render(scene, camera);
     dirty = false;
+    if (DEBUG) {
+      stageDebug.drawCalls = renderer.info.render.calls;
+      stageDebug.frames++;
+      stageDebug.bufferW = canvas.width;
+      stageDebug.bufferH = canvas.height;
+      stageDebug.clientW = canvas.clientWidth;
+      stageDebug.clientH = canvas.clientHeight;
+    }
   }
 
   function loop(nowMs: number) {
@@ -619,18 +658,22 @@ export function createCardScene(
         if (wasCurrent) mesh.material = rich;
       }
 
+      if (DEBUG) stageDebug.sized = true;
+
       dirty = true;
       if (!running) render(performance.now()); // keep the pinned frame correct
     },
     start() {
       if (running) return;
       running = true;
+      if (DEBUG) stageDebug.looping = true;
       render(performance.now()); // immediate, so resume lands before the fade
       raf = requestAnimationFrame(loop);
     },
     stop() {
       if (!running) return;
       running = false;
+      if (DEBUG) stageDebug.looping = false;
       cancelAnimationFrame(raf);
     },
     dispose() {
