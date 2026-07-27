@@ -41,7 +41,7 @@ export default function DebugOverlay() {
         `progress ${d.progress.toFixed(3)}`,
         `scroll   y=${d.scrollY}  events=${d.scrollEvents}`,
         `spacer   top=${d.spacerTop} h=${d.spacerH}`,
-        `variant  ${d.variant}`,
+        `variant  ${d.variant}   cards ${d.cards}`,
         `calls    ${d.drawCalls}   frames ${d.frames}`,
         `loop     ${d.looping ? "running" : "stopped"}  onScreen ${d.onScreen}`,
         d.fatal ? `\nFATAL\n${d.fatal}` : "",

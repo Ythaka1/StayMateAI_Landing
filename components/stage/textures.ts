@@ -106,6 +106,75 @@ export function makeGrainTexture(size = 256): THREE.Texture {
   return tex;
 }
 
+/*
+ * Room numbers for the instanced array.
+ *
+ * COST: one 256×256 RGBA canvas texture, ~256KB plus mips, and exactly one
+ * extra texture read — taken only in the ROOMS shader variant, which is used
+ * in beats 4 and 6. Beat 3's pivot, where the card fills the screen and fill
+ * rate decides the frame, never compiles it in. The alternative was a texture
+ * per card, which is what the atlas exists to avoid.
+ */
+export const ROOM_ATLAS_COLS = 4;
+export const ROOM_ATLAS_ROWS = 8;
+export const ROOM_ATLAS_CELLS = ROOM_ATLAS_COLS * ROOM_ATLAS_ROWS;
+
+/** The room numbers, in atlas cell order. Cell 0 is the hero card's. */
+export const ROOM_NUMBERS = [
+  "214", "101", "102", "104", "106", "108", "110", "112",
+  "201", "203", "205", "207", "209", "211", "216", "218",
+  "301", "302", "305", "307", "309", "311", "314", "316",
+  "401", "402", "404", "406", "408", "410", "412", "415",
+];
+
+/** One atlas of room numbers, sampled by a per-instance cell offset. */
+export function makeRoomsTexture(onRedraw?: () => void): THREE.Texture {
+  const SIZE = 256;
+  const cw = SIZE / ROOM_ATLAS_COLS; // 64
+  const ch = SIZE / ROOM_ATLAS_ROWS; // 32
+  const canvas = document.createElement("canvas");
+  canvas.width = SIZE;
+  canvas.height = SIZE;
+  const ctx = canvas.getContext("2d")!;
+
+  const draw = () => {
+    ctx.clearRect(0, 0, SIZE, SIZE);
+    ctx.fillStyle = "#15171b";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = `600 19px ${displayFamily()}`;
+    for (let i = 0; i < ROOM_ATLAS_CELLS; i++) {
+      const cx = (i % ROOM_ATLAS_COLS) * cw + cw / 2;
+      const cy = Math.floor(i / ROOM_ATLAS_COLS) * ch + ch / 2;
+      ctx.fillText(ROOM_NUMBERS[i] ?? "", cx, cy);
+    }
+  };
+
+  draw();
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = true;
+  tex.needsUpdate = true;
+
+  if (typeof document !== "undefined" && document.fonts) {
+    document.fonts
+      .load(`600 19px ${displayFamily()}`)
+      .then(() => document.fonts.ready)
+      .then(() => {
+        draw();
+        tex.needsUpdate = true;
+        onRedraw?.();
+      })
+      .catch(() => {
+        /* keep the fallback rendering */
+      });
+  }
+
+  return tex;
+}
+
 /**
  * The display face, as next/font named it. The font is loaded by the document,
  * not by canvas, so this reads the family off the CSS variable the layout

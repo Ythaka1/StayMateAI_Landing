@@ -38,6 +38,8 @@ export interface StageDebug {
   spacerH: number;
   /** Which compiled shader variant drew the last frame. */
   variant: string;
+  /** InstancedMesh count this frame — cards drawn, still one draw call. */
+  cards: number;
   /** renderer.info.render.calls after the last render. */
   drawCalls: number;
   frames: number;
@@ -67,6 +69,7 @@ export const stageDebug: StageDebug = {
   spacerTop: 0,
   spacerH: 0,
   variant: "none",
+  cards: 0,
   drawCalls: -1,
   frames: 0,
   looping: false,

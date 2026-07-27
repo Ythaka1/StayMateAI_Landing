@@ -68,3 +68,27 @@ export const DescentCopy = forwardRef<HTMLDivElement>(function DescentCopy(
     </div>
   );
 });
+
+/** Beat 4 — one line about the whole property, not one room. */
+export const PullbackCopy = forwardRef<HTMLDivElement>(function PullbackCopy(
+  _,
+  ref
+) {
+  return (
+    <div
+      ref={ref}
+      className={`${layerClass} justify-end pb-[9svh] opacity-0 motion-reduce:justify-start`}
+      data-copy="pullback"
+    >
+      <div className="mx-auto w-full max-w-[34rem] text-center">
+        <h2 className="font-display text-[clamp(1.35rem,4.6vw,1.85rem)] leading-snug text-paper">
+          One card in every room, answering all of them at once.
+        </h2>
+        <p className="mt-4 font-body text-[0.9375rem] leading-relaxed text-paper/60">
+          The same card, printed once per room. Nothing to install, nothing on
+          the wall, nothing for housekeeping to charge overnight.
+        </p>
+      </div>
+    </div>
+  );
+});

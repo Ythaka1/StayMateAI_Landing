@@ -1,15 +1,28 @@
 import * as THREE from "three";
-import { makeGrainTexture, makePrintTexture } from "./textures";
 import {
+  ROOM_ATLAS_COLS,
+  ROOM_ATLAS_ROWS,
+  makeGrainTexture,
+  makePrintTexture,
+  makeRoomsTexture,
+} from "./textures";
+import {
+  RETREAT_IN,
+  RETREAT_OUT,
   CONVERGE,
   DESCENT,
   DOLLY,
+  FAN_SETTLE,
   FLATTEN,
   LANDING,
+  LIGHTS_OUT,
+  LIGHTS_UP,
   PIVOT,
+  RECEDE,
+  RETURN,
+  canvasPivotProgress,
   easeInOutCubic,
   easeOutCubic,
-  pivotProgress,
   within,
 } from "./timeline";
 import { debugEnabled, stageDebug } from "./debug";
@@ -95,6 +108,27 @@ const CAM_FOLLOW = 0.62;
 const CARD_FLOAT_Y = 1.6;
 const CARD_FLOAT_Z = -0.3;
 
+/**
+ * How many cards exist. One InstancedMesh, one draw call, regardless — the
+ * count is what changes between beats, never the number of meshes. A hand, a
+ * phone, a room, a corridor and a hotel are all this same card, repeated.
+ */
+const CARD_COUNT = 18;
+
+/**
+ * How far the camera retreats past the landed framing, in card units — far
+ * enough for beat 4's corridor, then back in a little to frame beat 6's fan.
+ */
+const RETREAT_FAR = 8.6;
+const RETREAT_REST = 7.0;
+/**
+ * The camera also drops while the array is on screen, which lifts the whole
+ * field into the upper frame and leaves the lower third dark for beat 4's
+ * line. It rises again for the fan, which is dealt low.
+ */
+const RETREAT_Y_FAR = -1.05;
+const RETREAT_Y_REST = 0.6;
+
 /** Autonomous Y rotation in beat 1: ±6°, ~9s period. */
 const INTRO_AMPLITUDE = (6 * Math.PI) / 180;
 const INTRO_PERIOD_MS = 9000;
@@ -104,9 +138,23 @@ const INTRO_RELEASE_MS = 700;
 const vertexShader = /* glsl */ `
   varying vec2 vUv;
   varying vec3 vWorld;
+  #ifdef ROOMS
+    // Per-instance origin of this card's cell in the room-number atlas.
+    attribute vec2 aRoomCell;
+    varying vec2 vRoomCell;
+  #endif
   void main() {
     vUv = uv;
-    vec4 w = modelMatrix * vec4(position, 1.0);
+    #ifdef ROOMS
+      vRoomCell = aRoomCell;
+    #endif
+    // three declares instanceMatrix itself once the object is an
+    // InstancedMesh; every card in the site is an instance of this one plane.
+    vec4 local = vec4(position, 1.0);
+    #ifdef USE_INSTANCING
+      local = instanceMatrix * local;
+    #endif
+    vec4 w = modelMatrix * local;
     vWorld = w.xyz;
     gl_Position = projectionMatrix * viewMatrix * w;
   }
@@ -139,6 +187,13 @@ const fragmentShader = /* glsl */ `
   uniform vec3 uCardNormal;
   varying vec2 vUv;
   varying vec3 vWorld;
+  #ifdef ROOMS
+    uniform sampler2D uRooms;
+    uniform vec4 uRoomRect;   // where on the card: u0, v0, width, height
+    uniform vec2 uRoomCell;   // one cell's size in atlas UV
+    uniform vec3 uInk;
+    varying vec2 vRoomCell;
+  #endif
 
   float sdRoundedBox(vec2 p, vec2 b, float r) {
     vec2 q = abs(p) - b + r;
@@ -211,6 +266,19 @@ const fragmentShader = /* glsl */ `
       col = mix(tint, ink, pr.a * (1.0 - uFlat));
     #endif
     }
+
+    // The only thing that differs card to card: the room number, taken from
+    // one shared atlas at a per-instance cell offset. One extra sample, and
+    // only in this variant — beat 3's pivot never compiles it in.
+  #ifdef ROOMS
+    {
+      vec2 rn = (cuv - uRoomRect.xy) / uRoomRect.zw;
+      if (rn.x > 0.0 && rn.x < 1.0 && rn.y > 0.0 && rn.y < 1.0) {
+        float a = texture2D(uRooms, vRoomCell + rn * uRoomCell).a;
+        col = mix(col, uInk * (1.0 + grain * 0.10), a * (1.0 - uFlat));
+      }
+    }
+  #endif
 
     // A single warm key light, falling off to near-black. Art-directed, not
     // inverse-square: over a card this size 1/d² either crushes the paper to
@@ -329,6 +397,9 @@ export function createCardScene(
   const print = makePrintTexture(() => {
     dirty = true;
   });
+  const roomsTex = makeRoomsTexture(() => {
+    dirty = true;
+  });
 
   const uniforms: Record<string, THREE.IUniform> = {
       uGrain: { value: grain },
@@ -359,6 +430,14 @@ export function createCardScene(
       uCardSize: { value: new THREE.Vector2(CARD_W, CARD_H) },
       uPlaneSize: { value: new THREE.Vector2(PLANE_W, PLANE_H) },
     uCardNormal: { value: new THREE.Vector3(0, 0, 1) },
+    uRooms: { value: roomsTex },
+    // Sized 2:1 in world units to match the atlas cell, so glyphs are not
+    // stretched. Sits low on the card, where a room number would be printed.
+    uRoomRect: { value: new THREE.Vector4(0.41, 0.055, 0.18, 0.0675) },
+    uRoomCell: {
+      value: new THREE.Vector2(1 / ROOM_ATLAS_COLS, 1 / ROOM_ATLAS_ROWS),
+    },
+    uInk: { value: new THREE.Color("#15171b") },
   };
 
   /*
@@ -391,9 +470,129 @@ export function createCardScene(
   let rich = makeVariant({ DESK: "", EDGE_TERMS: "" });
   const deskOnly = makeVariant({ DESK: "" });
   const lean = makeVariant({});
+  const rooms = makeVariant({ ROOMS: "" });
 
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(PLANE_W, PLANE_H), rich);
+  const geometry = new THREE.PlaneGeometry(PLANE_W, PLANE_H);
+
+  // Which atlas cell each card reads its room number from. Static, set once.
+  const cells = new Float32Array(CARD_COUNT * 2);
+  for (let i = 0; i < CARD_COUNT; i++) {
+    cells[i * 2] = (i % ROOM_ATLAS_COLS) / ROOM_ATLAS_COLS;
+    cells[i * 2 + 1] =
+      1 - (Math.floor(i / ROOM_ATLAS_COLS) + 1) / ROOM_ATLAS_ROWS;
+  }
+  geometry.setAttribute(
+    "aRoomCell",
+    new THREE.InstancedBufferAttribute(cells, 2)
+  );
+
+  // ONE InstancedMesh for every card in the site. `count` is what changes
+  // between beats; the draw call count never does.
+  const mesh = new THREE.InstancedMesh(geometry, rich, CARD_COUNT);
+  mesh.frustumCulled = false; // the array is laid out well outside the card
+  mesh.count = 1;
   scene.add(mesh);
+
+  /*
+   * Two placements per card, generated once from a seeded PRNG so they are
+   * stable across reloads: a receding corridor for beat 4, and a loose fan for
+   * beat 6. Beats 5 and 6 interpolate between them, mostly while the cards are
+   * dark. Card 0 is the hero, and in the corridor it sits exactly where it has
+   * been since it landed — the guest journey happened on this card.
+   */
+  interface Placement {
+    x: number;
+    y: number;
+    z: number;
+    rotY: number;
+    rotZ: number;
+    scale: number;
+  }
+  const corridor: Placement[] = [];
+  const fan: Placement[] = [];
+  {
+    const rand = (() => {
+      let a = 0x9e3779b9;
+      return () => {
+        a = (a + 0x6d2b79f5) | 0;
+        let t = Math.imul(a ^ (a >>> 15), 1 | a);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    })();
+
+    for (let i = 0; i < CARD_COUNT; i++) {
+      if (i === 0) {
+        // The hero stays exactly where it landed. The guest journey happened
+        // on this card, and beat 4 opens by returning to it.
+        corridor.push({ x: 0, y: 0, z: 0, rotY: 0, rotZ: 0, scale: 1 });
+      } else {
+        /*
+         * A field of cards receding into the dark. Lateral spread is held
+         * constant with depth rather than widened, so perspective does the
+         * converging — that is what makes it read as doors down a corridor
+         * instead of a flat wall of cards. Slots are stepped by coprime
+         * strides and then jittered, so it lands off-grid without looking
+         * scattered.
+         */
+        const r = (i - 1) / (CARD_COUNT - 2); // 0 near, 1 far
+        const slotX = ((i * 3) % 5) - 2; // -2..2
+        const slotY = ((i * 2) % 3) - 1; // -1..1
+        corridor.push({
+          x: slotX * 2.15 + (rand() - 0.5) * 0.9,
+          y: slotY * 1.45 + (rand() - 0.5) * 0.7,
+          z: -1.1 - r * 15 - rand() * 0.9,
+          rotY: -Math.sign(slotX || 1) * (0.08 + rand() * 0.13),
+          rotZ: (rand() - 0.5) * 0.07,
+          scale: 1,
+        });
+      }
+
+      // Dealt across the lower frame, overlapping, tilted like a hand.
+      const t = i / (CARD_COUNT - 1);
+      const a = (t - 0.5) * 2;
+      fan.push({
+        x: a * 3.45,
+        y: -1.45 - (1 - Math.cos(a * 1.15)) * 0.55 + (rand() - 0.5) * 0.12,
+        z: -0.35 - t * 0.5 + (rand() - 0.5) * 0.16,
+        rotY: -a * 0.1,
+        rotZ: a * 0.42 + (rand() - 0.5) * 0.05,
+        scale: 0.62,
+      });
+    }
+  }
+
+  const tmpQuat = new THREE.Quaternion();
+  const tmpEuler = new THREE.Euler();
+  const tmpPos = new THREE.Vector3();
+  const tmpScale = new THREE.Vector3();
+  const tmpMat = new THREE.Matrix4();
+
+  /** Blend the two placements and push the result into the instance buffer. */
+  function layoutCards(fanT: number, emerge: number) {
+    for (let i = 0; i < CARD_COUNT; i++) {
+      const a = corridor[i];
+      const b = fan[i];
+      const k = fanT;
+      // Card 0 never shrinks away before the others arrive.
+      const grow = i === 0 ? 1 : emerge;
+      tmpPos.set(
+        a.x + (b.x - a.x) * k,
+        a.y + (b.y - a.y) * k,
+        a.z + (b.z - a.z) * k
+      );
+      tmpEuler.set(
+        0,
+        a.rotY + (b.rotY - a.rotY) * k,
+        a.rotZ + (b.rotZ - a.rotZ) * k
+      );
+      tmpQuat.setFromEuler(tmpEuler);
+      const s = (a.scale + (b.scale - a.scale) * k) * grow;
+      tmpScale.set(s, s, s);
+      mesh.setMatrixAt(i, tmpMat.compose(tmpPos, tmpQuat, tmpScale));
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+  }
 
   // The key light travels with the beat: steeper and more overhead while the
   // card is in the void, dropping to a lower, more raking angle as it lands.
@@ -413,6 +612,48 @@ export function createCardScene(
   const WARM_VOID = new THREE.Color(1.0, 0.99, 0.988);
   const WARM_DESK = new THREE.Color(1.0, 0.99, 0.972);
 
+  /*
+   * The light through beats 4–6. There is no fog volume anywhere in this
+   * scene; depth is sold entirely by how far each card is from this one key,
+   * through the same smoothstep falloff the card has always used. Reaching
+   * down a corridor just means moving the far edge of that falloff out.
+   */
+  interface KeyStop {
+    pos: THREE.Vector3;
+    near: number;
+    far: number;
+  }
+  const L_DESK: KeyStop = { pos: KEY_DESK, near: 2.3, far: 5.2 };
+  const L_ARRAY: KeyStop = {
+    pos: new THREE.Vector3(-3.0, 2.3, 3.4),
+    near: 3.4,
+    far: 15.5,
+  };
+  /*
+   * The light does not move to go out; its reach simply shortens until it
+   * touches nothing. `near` is held and only `far` is drawn in, which keeps
+   * the falloff's shape and makes the cards go dark in depth order, the far
+   * ones first. Collapsing both to zero instead put the whole change into a
+   * fraction of the beat — everything went out at once, part-way through a
+   * ramp that then had nothing left to do.
+   */
+  const L_OUT: KeyStop = { pos: L_ARRAY.pos, near: L_ARRAY.near, far: 3.5 };
+  const L_FAN: KeyStop = {
+    pos: new THREE.Vector3(-2.7, 2.6, 4.2),
+    near: 3.2,
+    far: 12.5,
+  };
+
+  const keyPos = new THREE.Vector3();
+  const mixKey = (a: KeyStop, b: KeyStop, t: number): KeyStop => {
+    keyPos.lerpVectors(a.pos, b.pos, t);
+    return {
+      pos: keyPos,
+      near: a.near + (b.near - a.near) * t,
+      far: a.far + (b.far - a.far) * t,
+    };
+  };
+
   // Both ends of the dolly adapt to the viewport: the start pulls back far
   // enough to frame the whole card, the end pushes in far enough that the
   // frame stays inside the blank band beside the QR.
@@ -429,6 +670,9 @@ export function createCardScene(
   // Beat 1's autonomous rotation — the only autonomous motion in the site.
   let introAmp = 1;
   let introReleasedAt = 0;
+
+  /** Whether card 0's instance matrix is currently identity. */
+  let heroIsIdentity = false;
 
   /**
    * Beat 3's dolly, at eased parameter t. THE camera path — beats 1 and 2 are
@@ -486,7 +730,24 @@ export function createCardScene(
    * occupying the same pixels.
    */
   function cameraAt(g: number, cardY: number) {
-    const base = dollyAt(easeInOutCubic(within(pivotProgress(g), DOLLY)));
+    const base = dollyAt(easeInOutCubic(within(canvasPivotProgress(g), DOLLY)));
+
+    if (g > PIVOT.end) {
+      // Beat 4 onward. The return to the desk needs no code of its own: the
+      // dolly above is already running backwards, because canvasPivotProgress
+      // runs back down through the same numbers. All that is left is to keep
+      // going once it has bottomed out, and then come to rest.
+      const out = easeInOutCubic(within(g, RETREAT_OUT));
+      const back = easeInOutCubic(within(g, RETREAT_IN));
+      return {
+        x: base.x,
+        y:
+          base.y +
+          RETREAT_Y_FAR * out -
+          (RETREAT_Y_FAR - RETREAT_Y_REST) * back,
+        z: base.z + RETREAT_FAR * out - (RETREAT_FAR - RETREAT_REST) * back,
+      };
+    }
     if (g >= PIVOT.start) return base;
 
     const lead = 1 - easeInOutCubic(within(g, CONVERGE));
@@ -535,9 +796,44 @@ export function createCardScene(
     u.uLanded.value = cardPos.drop;
     u.uBounce.value = cardPos.drop;
 
-    // The key drops lower and warms as the card comes down.
-    u.uLightPos.value.lerpVectors(KEY_VOID, KEY_DESK, cardPos.drop);
+    // The key drops lower and warms as the card comes down, then reaches out
+    // down the corridor, goes out entirely for the number, and comes back for
+    // the fan. One light, four stops, no fog.
     u.uWarm.value.lerpColors(WARM_VOID, WARM_DESK, cardPos.drop);
+    if (g <= PIVOT.end) {
+      u.uLightPos.value.lerpVectors(KEY_VOID, KEY_DESK, cardPos.drop);
+      u.uLightNear.value = L_DESK.near;
+      u.uLightFar.value = L_DESK.far;
+    } else {
+      // The two lighting changes ramp linearly, not eased. Eased, the middle
+      // of the curve does nearly all the visible work and the beat reads as a
+      // flick rather than a fade.
+      let k = mixKey(L_DESK, L_ARRAY, easeInOutCubic(within(g, RECEDE)));
+      k = mixKey(k, L_OUT, within(g, LIGHTS_OUT));
+      k = mixKey(k, L_FAN, within(g, LIGHTS_UP));
+      u.uLightPos.value.copy(k.pos);
+      u.uLightNear.value = k.near;
+      u.uLightFar.value = k.far;
+    }
+
+    // The array: how many cards exist this frame, and where they are.
+    const emerge = easeOutCubic(within(g, {
+      start: RECEDE.start,
+      end: RECEDE.start + (RECEDE.end - RECEDE.start) * 0.42,
+    }));
+    const fanT = easeInOutCubic(within(g, FAN_SETTLE));
+    const many = g > RECEDE.start;
+    mesh.count = many ? CARD_COUNT : 1;
+    if (many) {
+      layoutCards(fanT, emerge);
+      heroIsIdentity = false;
+    } else if (!heroIsIdentity) {
+      // While it is the only card, card 0 must be identity so the object
+      // transform places it — exactly as it did in beats 1 to 3.
+      mesh.setMatrixAt(0, tmpMat.identity());
+      mesh.instanceMatrix.needsUpdate = true;
+      heroIsIdentity = true;
+    }
 
     // One device pixel in card units at the card's plane.
     const pxPerUnit =
@@ -552,7 +848,9 @@ export function createCardScene(
       PRINT_CHROMA_TEXELS / PRINT_TEXTURE_W,
       0.8 / Math.max(pxPerUnit, 1) / CARD_W
     );
-    u.uFlat.value = within(pivotProgress(g), FLATTEN);
+    // The same flatten as beat 3, and on the way back out it simply unwinds,
+    // because canvasPivotProgress is running the same numbers backwards.
+    u.uFlat.value = within(canvasPivotProgress(g), FLATTEN);
 
     // Pick the cheapest shader that can still draw this frame. The desk is
     // only reachable when the frame extends past the card's silhouette, which
@@ -564,8 +862,12 @@ export function createCardScene(
       Math.abs(cam.x) + halfW > CARD_W / 2 - 0.02 ||
       Math.abs(cam.y - cardPos.y) + halfH > CARD_H / 2 - 0.02;
 
-    const next =
-      u.uRim.value > 0 || u.uGlass.value > 0
+    // Once there are many cards the desk goes away entirely: a contact pool
+    // per instance would multiply the shaded area by the card count, and the
+    // array is floating in dark or dealt in a fan, not sitting on a desk.
+    const next = many
+      ? rooms
+      : u.uRim.value > 0 || u.uGlass.value > 0
         ? rich
         : u.uLanded.value > 0 && deskInFrame
           ? deskOnly
@@ -573,7 +875,14 @@ export function createCardScene(
     if (mesh.material !== next) mesh.material = next;
     if (DEBUG) {
       stageDebug.variant =
-        next === rich ? "rich" : next === deskOnly ? "desk" : "lean";
+        next === rich
+          ? "rich"
+          : next === deskOnly
+            ? "desk"
+            : next === rooms
+              ? "rooms"
+              : "lean";
+      stageDebug.cards = mesh.count;
     }
   }
 
@@ -685,6 +994,8 @@ export function createCardScene(
       lean.dispose();
       grain.dispose();
       print.dispose();
+      roomsTex.dispose();
+      rooms.dispose();
       renderer.dispose();
     },
   };

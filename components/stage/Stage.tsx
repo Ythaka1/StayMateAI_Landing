@@ -4,18 +4,28 @@ import { useEffect, useRef, useState } from "react";
 import { MotionConfig } from "framer-motion";
 import { createCardScene, type CardScene } from "./scene";
 import { PANELS, Panel } from "./Panels";
-import { DarknessCopy, DescentCopy } from "./Copy";
+import { DarknessCopy, DescentCopy, PullbackCopy } from "./Copy";
+import { NumberBeat, type NumberBeatHandle } from "./NumberBeat";
+import { OfferBeat } from "./OfferBeat";
+import { Nav } from "@/components/site/Nav";
 import DebugOverlay from "./DebugOverlay";
 import { debugEnabled, stageDebug } from "./debug";
 import {
-  CANVAS_SLEEP_AT,
   COPY_DARKNESS,
   COPY_DESCENT,
+  COPY_NUMBER,
+  COPY_OFFER,
+  COPY_PULLBACK,
+  COUNT_AT,
   FADE,
+  NAV_IN,
   PANELS_TRAVEL,
   PANEL_COUNT,
+  PANEL_OUT,
+  PIVOT,
   STAGE_HEIGHT_VH,
   band,
+  canvasAsleep,
   clamp01,
   pivotProgress,
   progressForPanel,
@@ -46,6 +56,11 @@ export default function Stage() {
   const descentRef = useRef<HTMLDivElement>(null);
   const layerRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
+  const pullbackRef = useRef<HTMLDivElement>(null);
+  const numberRef = useRef<HTMLDivElement>(null);
+  const offerRef = useRef<HTMLDivElement>(null);
+  const navRef = useRef<HTMLElement>(null);
+  const countRef = useRef<NumberBeatHandle>(null);
   const reducedRef = useRef(false);
 
   const [active, setActive] = useState(0);
@@ -58,7 +73,16 @@ export default function Stage() {
     const descent = descentRef.current;
     const layer = layerRef.current;
     const track = trackRef.current;
-    if (!spacer || !canvas || !darkness || !descent || !layer || !track) return;
+    const pullback = pullbackRef.current;
+    const numberEl = numberRef.current;
+    const offer = offerRef.current;
+    const nav = navRef.current;
+    if (
+      !spacer || !canvas || !darkness || !descent || !layer || !track ||
+      !pullback || !numberEl || !offer || !nav
+    ) {
+      return;
+    }
 
     // TEMPORARY diagnostics (?debug=1). Remove with debug.ts.
     const DEBUG = debugEnabled();
@@ -142,9 +166,23 @@ export default function Stage() {
       setLayerOpacity(darkness, band(g, COPY_DARKNESS));
       setLayerOpacity(descent, band(g, COPY_DESCENT));
 
-      // Beat 3: cross-fade the DOM phone layer up over the canvas.
+      // Beats 4, 5 and 6.
+      setLayerOpacity(pullback, band(g, COPY_PULLBACK));
+      setLayerOpacity(numberEl, band(g, COPY_NUMBER));
+      setLayerOpacity(offer, band(g, COPY_OFFER));
+      setLayerOpacity(nav, band(g, NAV_IN));
+      // The count runs once, on the way down, and never again.
+      if (g >= COUNT_AT) countRef.current?.run();
+
+      /*
+       * Beat 3: cross-fade the DOM phone layer up over the canvas, and beat 4:
+       * fade it back down. The mirror is exact — the same 8% of a beat, the
+       * same flat cream field underneath, and the canvas already awake before
+       * this starts moving (see the sleep test below).
+       */
       const pp = pivotProgress(g);
-      const fade = within(pp, FADE);
+      const fade =
+        g <= PIVOT.end ? within(pp, FADE) : 1 - within(g, PANEL_OUT);
       setLayerOpacity(layer, fade);
       const pointer = fade >= 1 ? "auto" : "none";
       if (pointer !== lastPointer) {
@@ -166,9 +204,11 @@ export default function Stage() {
         setActive(idx);
       }
 
-      // Stop the RAF loop once the DOM layer is fully opaque; resume before
-      // it starts fading back out. Never a mere opacity-0 canvas.
-      if (!onScreen || pp >= CANVAS_SLEEP_AT) scene.stop();
+      // Stop the RAF loop wherever the canvas cannot be seen — behind the
+      // opaque panel layer in beat 3, and through the dark middle of beat 5.
+      // Both resume before anything they are hiding behind starts to move.
+      // Never a mere opacity-0 canvas.
+      if (!onScreen || canvasAsleep(g)) scene.stop();
       else scene.start();
     };
 
@@ -265,11 +305,16 @@ export default function Stage() {
     <MotionConfig reducedMotion="user">
       {/* TEMPORARY — renders only with ?debug=1. Remove with debug.ts. */}
       <DebugOverlay />
+
+      {/* Outside the spacer: the sticky container is overflow-clip, which
+          would clip a fixed child. */}
+      <Nav ref={navRef} />
+
       <div
         ref={spacerRef}
         className="relative motion-reduce:!h-auto"
         style={{ height: `${STAGE_HEIGHT_VH}svh` }}
-        data-stage="beats-1-3"
+        data-stage="beats-1-6"
       >
         {/* overflow-clip, not hidden: a hidden box is still a scroll
             container, so the browser can scrollLeft the track when focus
@@ -310,6 +355,12 @@ export default function Stage() {
               ))}
             </div>
           </div>
+
+          {/* Beats 4, 5 and 6. Ordered after the panel layer so the stacked
+              reduced-motion fallback reads in beat order top to bottom. */}
+          <PullbackCopy ref={pullbackRef} />
+          <NumberBeat ref={numberRef} countRef={countRef} />
+          <OfferBeat ref={offerRef} />
         </div>
       </div>
     </MotionConfig>

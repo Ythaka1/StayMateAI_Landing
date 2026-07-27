@@ -26,16 +26,30 @@ warmer, and a soft bounce from below. Copy fades in once the card is settled.
 the frame, the frame becomes a phone screen, scrolling turns sideways through
 four panels of the guest journey, then turns back.
 
-Beats 4, 5 and 6, the nav, the footer and the contact page are not built yet.
+**Beat 4 — the pull-back.** The panel layer fades down, the canvas resumes, and
+the camera retraces the dolly to the landed card before continuing out. The one
+card becomes many — the same card, instanced, receding into the dark, each
+carrying a different room number.
+
+**Beat 5 — the number.** The light leaves the cards. One figure counts up and
+settles, alone on black, with one line naming it as illustrative. DOM, not
+canvas; the loop is stopped through here.
+
+**Beat 6 — the fan.** The light returns, the cards settle into a loose fan
+across the lower frame, the camera comes to rest, and the pilot offer sits
+above them.
+
+The contact page is not built yet.
 
 ## One stage, one camera path
 
-All three beats share a single sticky section, a single canvas and a single
-camera path, so the camera never cuts from the top of the page to the end of
-the pivot. Beats 1 and 2 are expressed as offsets from `dollyAt(0)` — the
-pivot's own opening frame — that decay to exactly zero at `PIVOT.start`. There
-is no second path to drift out of sync with the first, and no camera number
-written down twice.
+All six beats share a single sticky section, a single canvas and a single
+camera path, so the camera never cuts from the top of the page to the bottom.
+Beats 1 and 2 are offsets from `dollyAt(0)` — the pivot's own opening frame —
+that decay to exactly zero at `PIVOT.start`. Beat 4 runs the same `dollyAt()`
+backwards, by running a pivot-equivalent progress back down through the same
+numbers, so the return needs no camera code of its own. There is no second
+path to drift out of sync with the first, and no camera number written twice.
 
 `components/stage/timeline.ts` owns every scroll range as plain constants. One
 global progress value drives the camera, the copy layers, the cross-fade and
@@ -56,17 +70,29 @@ Three details the seam depends on:
 - the terminal camera distance is derived from the width of the blank band, so
   the dolly ends exactly when the frame fills with stock on any aspect ratio.
 
+## One object, many cards
+
+Every card in the site is an instance of the same plane: one `InstancedMesh`,
+one draw call, whatever the count. `mesh.count` is what changes between beats —
+1 through beats 1 to 4's return, 18 from the corridor onward. Verified in the
+debug overlay: `calls` stays at 1 throughout.
+
+The only per-instance variation is the room number, taken from a single atlas
+at a per-instance UV offset. Measured cost: one 256×256 texture and one extra
+texture read, and only in the `rooms` variant — beat 3's pivot, where the card
+fills the screen, never compiles it in.
+
 ## Shader variants
 
-The fragment shader is compiled three ways and swapped per frame: `rich` (edge
+The fragment shader is compiled four ways and swapped per frame: `rich` (edge
 terms and, at ≥768px, the deboss chroma, plus the desk) for beats 1 and 2,
-`desk` for beat 3 while the card does not fill the frame, and `lean` — pass
-01's shader exactly — once it does.
+`desk` for beat 3 while the card does not fill the frame, `lean` — pass
+01's shader exactly — once it does, and `rooms` for the instanced beats.
 
 This is not premature: a runtime `if` on a uniform is not free. Measured here,
 an unused-but-present fresnel block cost a third of the frame time during the
 pivot, because the rasteriser evaluates both sides and masks. Compiling the
-dead code out is the only version of "off" that is actually off. All three are
+dead code out is the only version of "off" that is actually off. All four are
 compiled at startup, so swapping never triggers a compile or a hitch.
 
 ## Swapping in real artwork
@@ -84,7 +110,8 @@ redraws in place once the font arrives — no gate on first paint.
 ## Accessibility
 
 `prefers-reduced-motion` gets no pin and no canvas — the WebGL context is never
-created and the four panels render as stacked static sections. This is handled
+created and all six beats render as stacked static sections — including beat
+5's figure, which is simply printed rather than counted. This is handled
 structurally in CSS (`motion-reduce:` variants over a single DOM tree) so there
 is no hydration flash and no layout shift.
 
