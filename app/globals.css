@@ -24,12 +24,20 @@
   --font-body: var(--font-archivo);
 }
 
+/*
+ * Night, not paper. Since pass 04 the WebGL canvas is one fixed layer that
+ * the whole document scrolls over, and the flat sections are opaque boxes
+ * on top of it. The root background is what shows through the 3D segments —
+ * which are transparent windows onto the canvas — and it is also what
+ * overscroll reveals at both ends of the page. Both want the same near-black
+ * the canvas clears to.
+ */
 html {
-  background: var(--paper);
+  background: var(--night);
 }
 
 body {
-  background: var(--paper);
+  background: transparent;
   color: var(--ink);
   font-family: var(--font-archivo), system-ui, sans-serif;
 }
@@ -41,4 +49,140 @@ html.lenis body {
 }
 .lenis.lenis-smooth {
   scroll-behavior: auto !important;
+}
+
+/* ── The blur cascade ───────────────────────────────────────────────────────
+ * One word rising out of a blur. Used by every flat section's reveal and by
+ * the concierge answer in section 4, so the site and the product move the
+ * same way.
+ *
+ * `backwards` fill matters: every word carries an animation-delay, and
+ * without it each word paints at its final position for one frame before its
+ * delay elapses — which is the whole line flashing in, then cascading.
+ */
+@keyframes word-rise {
+  from {
+    opacity: 0;
+    filter: blur(7px);
+    transform: translate3d(0, 0.42em, 0);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.animate-word-rise {
+  animation: word-rise 620ms cubic-bezier(0.22, 0.61, 0.36, 1) backwards;
+}
+
+/* ── Section 6's ring ───────────────────────────────────────────────────────
+ * The ring turns and each label counter-turns at the same rate, so the text
+ * stays upright while its position orbits. Two animations rather than one
+ * because a single rotation would carry the words upside down through the
+ * bottom of the circle.
+ */
+@keyframes orbit-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes orbit-counter {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(-360deg);
+  }
+}
+
+/*
+ * The ring exists at sm and up only. Below that the same eight elements are
+ * left in normal flow as a centred column — one list in the DOM, laid out two
+ * ways, rather than two lists with one of them hidden from everybody except
+ * screen readers, which would read the question eight times twice.
+ *
+ * --r is the orbit radius. It has to be a length, not a percentage: a
+ * percentage in translateY resolves against the element's own height, so
+ * eight labels of different heights would sit on eight different circles.
+ */
+.orbit {
+  --r: clamp(9rem, 23vw, 16.5rem);
+}
+
+@media (min-width: 640px) {
+  .orbit {
+    height: calc(var(--r) * 2 + 9rem);
+  }
+  .orbit-ring {
+    position: absolute;
+    inset: 0;
+  }
+  .orbit-item {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    /* Centre the box on the origin, swing out to the ring, then take the
+       swing back out of the box so the label itself is never tilted. */
+    transform: translate(-50%, -50%) rotate(var(--a))
+      translateY(calc(var(--r) * -1)) rotate(calc(var(--a) * -1));
+  }
+  /* Very slow, and linear — an eased orbit reads as a carousel. Just under
+     two minutes for a full turn, which is slower than anyone will stay. */
+  .animate-orbit-spin {
+    animation: orbit-spin 110s linear infinite;
+  }
+  .animate-orbit-counter {
+    animation: orbit-counter 110s linear infinite;
+  }
+}
+
+/* ── The scroll cue ─────────────────────────────────────────────────────────
+ * A brass hairline that draws itself downward once and then goes. Not a
+ * bouncing chevron: it happens a single time, says "there is more below",
+ * and never asks again.
+ */
+@keyframes rule-draw {
+  0% {
+    transform: scaleY(0);
+    opacity: 0;
+  }
+  18% {
+    opacity: 1;
+  }
+  55% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scaleY(1);
+    opacity: 0;
+  }
+}
+
+.animate-rule-draw {
+  transform-origin: top;
+  animation: rule-draw 3.6s ease-in-out 1.4s forwards;
+}
+
+/*
+ * Reduced motion: nothing above runs. The cascades resolve to plain text and
+ * the ring becomes a static arrangement — which is the point of building both
+ * as CSS animations over markup that already reads correctly without them.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .animate-word-rise,
+  .animate-rule-draw,
+  .animate-orbit-spin,
+  .animate-orbit-counter {
+    animation: none !important;
+  }
+  .animate-rule-draw {
+    opacity: 0;
+  }
 }

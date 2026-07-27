@@ -39,6 +39,32 @@ export const DarknessCopy = forwardRef<HTMLDivElement>(function DarknessCopy(
 });
 
 /**
+ * The scroll cue — a brass hairline that draws itself downward, once.
+ *
+ * Not a bouncing chevron. A chevron repeats forever, which reads as the page
+ * nagging; this happens a single time under the opening line, says there is
+ * more below, and is gone. It never returns, including on scroll-back, and
+ * under reduced motion it is not shown at all — the animation *is* the
+ * message, and a static hairline under the copy would just be a stray rule.
+ *
+ * It sits in its own layer rather than inside DarknessCopy because that
+ * layer's opacity is written every frame from the scroll handler, which would
+ * multiply against the CSS fade and make the timing impossible to reason
+ * about.
+ */
+export function ScrollCue() {
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-x-0 bottom-[6svh] flex justify-center motion-reduce:hidden"
+      data-copy="cue"
+    >
+      <span className="animate-rule-draw block h-[7svh] w-px bg-gradient-to-b from-brass/0 via-brass/70 to-brass/0" />
+    </div>
+  );
+}
+
+/**
  * Beat 2 — what the product is, in two short lines, plus the multilingual
  * behaviour. No button: the landing is the emotional beat, not a conversion
  * point.

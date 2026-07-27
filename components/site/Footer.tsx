@@ -1,12 +1,17 @@
-import { WHATSAPP_HREF } from "@/components/stage/OfferBeat";
+import { CONTACT_EMAIL, WHATSAPP_HREF } from "@/lib/contact";
 
 /*
  * Quiet. A wordmark, one line, the demo, and a way to reach a person. No
- * sitemap and no columns of links that go nowhere — there are no other pages.
+ * sitemap and no columns of links that go nowhere — there are no other pages
+ * on this site, and a footer that pretends otherwise is just furniture.
+ *
+ * z-10 because the WebGL canvas is fixed behind the whole document; without
+ * it the footer would sit in the same stacking context as the canvas rather
+ * than over it.
  */
 export default function Footer() {
   return (
-    <footer className="border-t border-paper/10 bg-night px-6 py-14 sm:px-10">
+    <footer className="relative z-10 border-t border-paper/10 bg-night px-6 py-14 sm:px-10">
       <div className="mx-auto flex w-full max-w-[46rem] flex-col gap-8 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="font-display text-[0.9375rem] tracking-[0.2em] text-paper/90">
@@ -24,10 +29,10 @@ export default function Footer() {
             See a demo
           </a>
           <a
-            href="mailto:hello@staymate.ai"
+            href={`mailto:${CONTACT_EMAIL}`}
             className="underline-offset-4 transition-colors hover:text-paper hover:underline"
           >
-            hello@staymate.ai
+            {CONTACT_EMAIL}
           </a>
         </nav>
       </div>

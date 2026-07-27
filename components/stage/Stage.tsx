@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { MotionConfig } from "framer-motion";
 import { createCardScene, type CardScene } from "./scene";
 import { PANELS, Panel } from "./Panels";
-import { DarknessCopy, DescentCopy, PullbackCopy } from "./Copy";
+import { DarknessCopy, DescentCopy, PullbackCopy, ScrollCue } from "./Copy";
 import { NumberBeat, type NumberBeatHandle } from "./NumberBeat";
-import { OfferBeat } from "./OfferBeat";
 import { Nav } from "@/components/site/Nav";
 import DebugOverlay from "./DebugOverlay";
 import { debugEnabled, stageDebug } from "./debug";
@@ -14,19 +13,17 @@ import {
   COPY_DARKNESS,
   COPY_DESCENT,
   COPY_NUMBER,
-  COPY_OFFER,
   COPY_PULLBACK,
   COUNT_AT,
   FADE,
   NAV_IN,
   PANELS_TRAVEL,
   PANEL_COUNT,
-  PANEL_OUT,
-  PIVOT,
-  STAGE_HEIGHT_VH,
+  SEGMENTS,
   band,
   canvasAsleep,
   clamp01,
+  globalFromSegment,
   pivotProgress,
   progressForPanel,
   within,
@@ -34,31 +31,104 @@ import {
 import { getLenis } from "@/lib/lenis";
 
 /*
- * Beats 1, 2 and 3 — darkness, the descent, and the pivot.
+ * The 3D, and only the 3D.
  *
- * One sticky section inside one tall spacer, one canvas, one camera path. The
- * camera never cuts from the top of the page to the end of the pivot, which
- * is only true because there is a single path: beats 1 and 2 are offsets from
- * the pivot dolly's own start that decay to zero (see cameraAt in scene.ts).
+ * ── What changed in pass 04 ───────────────────────────────────────────────
+ * The site used to be one unbroken camera move down one very tall spacer.
+ * That is why the long verticals felt empty: a continuous camera has to fill
+ * every moment of its own length, and there was nothing to fill them with.
+ *
+ * The camera path itself is unchanged. What changed is that it is now cut
+ * into three segments — the descent, the pivot, the corridor — with flat
+ * photographic sections between them, passed in as `afterDescent`,
+ * `afterPivot` and `afterCorridor`. The 3D is punctuation; the flat sections
+ * are the page.
+ *
+ * The cuts are at PIVOT.start and PIVOT.end, both points where the camera is
+ * already at rest, and each segment maps its own scroll into its slice of the
+ * same global 0–1 (see SEGMENTS in timeline.ts). The frame a segment ends on
+ * is therefore the exact frame the next one opens on, which is what keeps
+ * three spacers reading as one interrupted move rather than three animations.
+ *
+ * ── One canvas, three windows ─────────────────────────────────────────────
+ * There is still exactly one WebGL context. The canvas is position:fixed
+ * behind the document; the flat sections are opaque and scroll over it, and
+ * the three segments are transparent spacers — windows onto it. Three
+ * canvases would be three contexts, and browsers start evicting them at
+ * around sixteen.
  *
  * Nothing here preventDefaults wheel or touch; the page scrolls normally and
  * only the visual is pinned.
  *
  * Reduced motion is handled structurally in CSS (motion-reduce: variants),
  * not by swapping React trees — so there is no hydration flash and no layout
- * shift. In that path no WebGL context is created at all and the beats become
- * plain stacked sections.
+ * shift. In that path no WebGL context is created at all and the segments
+ * become plain stacked dark sections.
  */
-export default function Stage() {
-  const spacerRef = useRef<HTMLDivElement>(null);
+
+/** Spacer height for a segment: its travel plus the one sticky viewport. */
+const spacerVh = (vh: number) => `${vh + 100}svh`;
+
+/**
+ * A transparent window onto the fixed canvas, with its copy pinned inside it.
+ *
+ * Module scope, not an inner function: an inner component is a new type on
+ * every render, so React would unmount and rebuild the whole subtree — and
+ * with it the canvas overlays and the panel track — every time `active`
+ * changed.
+ */
+function Segment({
+  innerRef,
+  index,
+  label,
+  children,
+}: {
+  innerRef: RefObject<HTMLDivElement | null>;
+  index: number;
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      ref={innerRef}
+      className="relative motion-reduce:!h-auto"
+      style={{ height: spacerVh(SEGMENTS[index].vh) }}
+      data-stage={label}
+    >
+      {/* overflow-clip, not hidden: a hidden box is still a scroll container,
+          so the browser can scrollLeft the track when focus lands on an
+          off-frame panel. clip creates no scrollport at all, which makes that
+          whole failure mode impossible.
+
+          No background: this is a window onto the fixed canvas behind the
+          document. The motion-reduce path has no canvas, so there it takes
+          the near-black the canvas would otherwise have cleared to. */}
+      <div className="sticky top-0 h-[100svh] overflow-clip motion-reduce:static motion-reduce:h-auto motion-reduce:overflow-visible motion-reduce:bg-night">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+export default function Stage({
+  afterDescent,
+  afterPivot,
+  afterCorridor,
+}: {
+  afterDescent?: ReactNode;
+  afterPivot?: ReactNode;
+  afterCorridor?: ReactNode;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const descentSegRef = useRef<HTMLDivElement>(null);
+  const pivotSegRef = useRef<HTMLDivElement>(null);
+  const corridorSegRef = useRef<HTMLDivElement>(null);
   const darknessRef = useRef<HTMLDivElement>(null);
   const descentRef = useRef<HTMLDivElement>(null);
   const layerRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
   const pullbackRef = useRef<HTMLDivElement>(null);
   const numberRef = useRef<HTMLDivElement>(null);
-  const offerRef = useRef<HTMLDivElement>(null);
   const navRef = useRef<HTMLElement>(null);
   const countRef = useRef<NumberBeatHandle>(null);
   const reducedRef = useRef(false);
@@ -67,7 +137,6 @@ export default function Stage() {
   const activeRef = useRef(0);
 
   useEffect(() => {
-    const spacer = spacerRef.current;
     const canvas = canvasRef.current;
     const darkness = darknessRef.current;
     const descent = descentRef.current;
@@ -75,14 +144,19 @@ export default function Stage() {
     const track = trackRef.current;
     const pullback = pullbackRef.current;
     const numberEl = numberRef.current;
-    const offer = offerRef.current;
     const nav = navRef.current;
+    const spacers = [
+      descentSegRef.current,
+      pivotSegRef.current,
+      corridorSegRef.current,
+    ];
     if (
-      !spacer || !canvas || !darkness || !descent || !layer || !track ||
-      !pullback || !numberEl || !offer || !nav
+      !canvas || !darkness || !descent || !layer || !track ||
+      !pullback || !numberEl || !nav || spacers.some((s) => !s)
     ) {
       return;
     }
+    const segs = spacers as HTMLDivElement[];
 
     // TEMPORARY diagnostics (?debug=1). Remove with debug.ts.
     const DEBUG = debugEnabled();
@@ -95,7 +169,7 @@ export default function Stage() {
     }
 
     if (reduced.matches) {
-      // No pin, no canvas at all. CSS has already laid the beats out as
+      // No pin, no canvas at all. CSS has already laid the segments out as
       // stacked static sections; make every panel's copy visible.
       reducedRef.current = true;
       setActive(-1);
@@ -111,8 +185,7 @@ export default function Stage() {
       return;
     }
 
-    let onScreen = false;
-    let lastApplied = -1;
+    let lastApplied = "";
 
     const applySize = () => {
       const w = canvas.clientWidth;
@@ -126,14 +199,14 @@ export default function Stage() {
 
     /**
      * Write an overlay's opacity only when it has actually changed. There are
-     * now four full-viewport layers over the canvas and writing all of them
-     * on every scroll event costs a style recalc per layer per frame, while
-     * three of the four are sitting at a flat 0 or 1 the whole time.
+     * several full-viewport layers over the canvas and writing all of them on
+     * every scroll event costs a style recalc per layer per frame, while most
+     * of them sit at a flat 0 or 1 the whole time.
      *
      * Deliberately opacity only — not visibility or display. Hiding the panel
      * layer would take it out of the tab order, and hiding the copy layers
-     * would take beats 1 and 2 out of the accessibility tree, where they are
-     * the only copy those beats have.
+     * would take those beats out of the accessibility tree, where they are
+     * the only copy the beats have.
      */
     const opacities = new WeakMap<HTMLElement, number>();
     const setLayerOpacity = (el: HTMLElement, v: number) => {
@@ -145,44 +218,107 @@ export default function Stage() {
 
     let lastTrack = -1;
     let lastPointer = "";
+    let lastVisible = "";
+    // The nav only ever comes on. Nothing writes it while a flat section
+    // fills the viewport, so without the latch it would blink off between
+    // segments.
+    let navLatch = 0;
+    const raiseNav = (v: number) => {
+      if (v <= navLatch) return;
+      navLatch = v;
+      setLayerOpacity(nav, v);
+    };
+
+    /**
+     * Which segment owns the camera right now, and how far through it we are.
+     *
+     * Coverage, rather than "the first one intersecting": at a boundary two
+     * spacers can both be on screen, and the one that should be driving is
+     * the one being looked at. Every flat section between them is at least a
+     * viewport tall, so in practice this is never ambiguous.
+     */
+    const readSegment = () => {
+      const vh = window.innerHeight;
+      let index = -1;
+      let cover = 0;
+      let local = 0;
+      for (let i = 0; i < segs.length; i++) {
+        const r = segs[i].getBoundingClientRect();
+        const seen = Math.min(r.bottom, vh) - Math.max(r.top, 0);
+        if (seen <= cover) continue;
+        cover = seen;
+        index = i;
+        const travel = r.height - vh;
+        local = travel > 0 ? clamp01(-r.top / travel) : 0;
+      }
+      return { index, local };
+    };
 
     const apply = () => {
-      const rect = spacer.getBoundingClientRect();
-      const travel = rect.height - window.innerHeight;
-      const g = travel > 0 ? clamp01(-rect.top / travel) : 0;
+      const { index, local } = readSegment();
+
+      // Nothing 3D on screen: the canvas is behind an opaque flat section.
+      // Stop the loop and take it out of the compositor entirely.
+      if (index < 0) {
+        if (lastVisible !== "hidden") {
+          lastVisible = "hidden";
+          canvas.style.visibility = "hidden";
+        }
+        scene.stop();
+        raiseNav(window.scrollY > window.innerHeight ? 1 : 0);
+        lastApplied = "";
+        return;
+      }
+
+      const segment = SEGMENTS[index];
+      const g = globalFromSegment(index, local);
+
       if (DEBUG) {
         stageDebug.progress = g;
         stageDebug.scrollY = Math.round(window.scrollY);
-        stageDebug.spacerTop = Math.round(rect.top);
-        stageDebug.spacerH = Math.round(rect.height);
-        stageDebug.onScreen = onScreen;
+        const r = segs[index].getBoundingClientRect();
+        stageDebug.spacerTop = Math.round(r.top);
+        stageDebug.spacerH = Math.round(r.height);
+        stageDebug.onScreen = true;
       }
-      if (g === lastApplied) return;
-      lastApplied = g;
+
+      // Keyed on the segment as well as the progress: the two ends of a cut
+      // share a progress value but not a state.
+      const key = `${index}:${g}`;
+      if (key === lastApplied) return;
+      lastApplied = key;
+
+      if (lastVisible !== "visible") {
+        lastVisible = "visible";
+        canvas.style.visibility = "visible";
+      }
 
       scene.setProgress(g);
 
-      // Beats 1 and 2: copy.
+      // The descent segment's copy.
       setLayerOpacity(darkness, band(g, COPY_DARKNESS));
       setLayerOpacity(descent, band(g, COPY_DESCENT));
 
-      // Beats 4, 5 and 6.
+      // The corridor segment's copy.
       setLayerOpacity(pullback, band(g, COPY_PULLBACK));
       setLayerOpacity(numberEl, band(g, COPY_NUMBER));
-      setLayerOpacity(offer, band(g, COPY_OFFER));
-      setLayerOpacity(nav, band(g, NAV_IN));
+
+      raiseNav(band(g, NAV_IN));
+
       // The count runs once, on the way down, and never again.
       if (g >= COUNT_AT) countRef.current?.run();
 
       /*
-       * Beat 3: cross-fade the DOM phone layer up over the canvas, and beat 4:
-       * fade it back down. The mirror is exact — the same 8% of a beat, the
-       * same flat cream field underneath, and the canvas already awake before
-       * this starts moving (see the sleep test below).
+       * The pivot segment: cross-fade the DOM phone layer up over the canvas.
+       *
+       * It no longer fades back down — the segment ends on the panels and a
+       * flat section takes over. Gated on the segment rather than on `g`,
+       * because every g past PIVOT.end has a pivot progress of 1, which would
+       * otherwise leave this opaque cream layer at full strength across the
+       * corridor segment.
        */
       const pp = pivotProgress(g);
-      const fade =
-        g <= PIVOT.end ? within(pp, FADE) : 1 - within(g, PANEL_OUT);
+      const fade = segment.id === "pivot" ? within(pp, FADE) : 0;
       setLayerOpacity(layer, fade);
       const pointer = fade >= 1 ? "auto" : "none";
       if (pointer !== lastPointer) {
@@ -205,10 +341,10 @@ export default function Stage() {
       }
 
       // Stop the RAF loop wherever the canvas cannot be seen — behind the
-      // opaque panel layer in beat 3, and through the dark middle of beat 5.
-      // Both resume before anything they are hiding behind starts to move.
-      // Never a mere opacity-0 canvas.
-      if (!onScreen || canvasAsleep(g)) scene.stop();
+      // opaque panel layer at the end of the pivot, and through the dark
+      // middle of the corridor. Both resume before anything they are hiding
+      // behind starts to move. Never a mere opacity-0 canvas.
+      if (canvasAsleep(g, segment.id)) scene.stop();
       else scene.start();
     };
 
@@ -224,19 +360,9 @@ export default function Stage() {
     };
     const onResize = () => {
       applySize();
-      lastApplied = -1;
+      lastApplied = "";
       apply();
     };
-
-    const io = new IntersectionObserver(
-      ([entry]) => {
-        onScreen = entry.isIntersecting;
-        lastApplied = -1;
-        apply();
-      },
-      { rootMargin: "10% 0px" }
-    );
-    io.observe(spacer);
 
     window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", onResize);
@@ -256,7 +382,6 @@ export default function Stage() {
     if (window.scrollY > 4) scene.releaseIntro();
 
     return () => {
-      io.disconnect();
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onResize);
       window.removeEventListener("scroll", onFirstInput);
@@ -269,24 +394,27 @@ export default function Stage() {
 
   /**
    * Keyboard reachability: tabbing into a panel that is off-frame moves the
-   * page to the progress value that centres it. End still walks past the
-   * whole section because nothing here is hijacked.
+   * page to the position that centres it. End still walks past the whole
+   * section because nothing here is hijacked.
    *
    * Two details this has to fight:
    *  - the browser runs its own scroll-into-view for the newly focused
    *    element, which lands after the focus event; the position is
    *    re-asserted on the next two frames so ours is the one that sticks.
    *  - the jump is immediate rather than animated, because an in-flight
-   *    smooth scroll swallows the very next keypress — that is how End
-   *    ends up stopping halfway down the page.
+   *    smooth scroll swallows the very next keypress — that is how End ends
+   *    up stopping halfway down the page.
    */
   const focusPanel = (index: number) => {
     if (reducedRef.current) return;
-    const spacer = spacerRef.current;
+    const spacer = pivotSegRef.current;
     if (!spacer) return;
     const travel = spacer.offsetHeight - window.innerHeight;
     if (travel <= 0) return;
-    const target = spacer.offsetTop + travel * progressForPanel(index);
+    // Document offset, not offsetTop: the spacer's offsetParent is now the
+    // positioned wrapper that stacks over the canvas, not the document.
+    const top = spacer.getBoundingClientRect().top + window.scrollY;
+    const target = top + travel * progressForPanel(index);
     if (Math.abs(window.scrollY - target) < 8) return;
 
     const goTo = () => {
@@ -306,32 +434,32 @@ export default function Stage() {
       {/* TEMPORARY — renders only with ?debug=1. Remove with debug.ts. */}
       <DebugOverlay />
 
-      {/* Outside the spacer: the sticky container is overflow-clip, which
-          would clip a fixed child. */}
       <Nav ref={navRef} />
 
-      <div
-        ref={spacerRef}
-        className="relative motion-reduce:!h-auto"
-        style={{ height: `${STAGE_HEIGHT_VH}svh` }}
-        data-stage="beats-1-6"
-      >
-        {/* overflow-clip, not hidden: a hidden box is still a scroll
-            container, so the browser can scrollLeft the track when focus
-            lands on an off-frame panel. clip creates no scrollport at all,
-            which makes that whole failure mode impossible. */}
-        <div className="sticky top-0 h-[100svh] overflow-clip bg-night motion-reduce:static motion-reduce:h-auto motion-reduce:overflow-visible motion-reduce:bg-paper">
-          {/* Canvas dimensions are reserved by CSS before three.js touches
-              it, so initialisation causes no layout shift. */}
-          <canvas
-            ref={canvasRef}
-            aria-hidden="true"
-            className="absolute inset-0 block h-full w-full motion-reduce:hidden"
-          />
+      {/*
+        The one WebGL context on the site. Fixed rather than sticky because it
+        has to serve three separate segments; the opaque flat sections scroll
+        over it and the segments are the gaps it shows through. Its dimensions
+        are reserved by CSS before three.js touches it, so initialisation
+        causes no layout shift.
+      */}
+      <canvas
+        ref={canvasRef}
+        aria-hidden="true"
+        className="pointer-events-none fixed inset-0 z-0 block h-full w-full motion-reduce:hidden"
+      />
 
+      {/* Everything that scrolls, stacked over the canvas. */}
+      <div className="relative z-10">
+        <Segment innerRef={descentSegRef} index={0} label="descent">
           <DarknessCopy ref={darknessRef} />
+          <ScrollCue />
           <DescentCopy ref={descentRef} />
+        </Segment>
 
+        {afterDescent}
+
+        <Segment innerRef={pivotSegRef} index={1} label="pivot">
           {/* The phone layer. Same cream as the card stock — the seam is
               invisible because there is nothing at the seam. */}
           <div
@@ -355,13 +483,16 @@ export default function Stage() {
               ))}
             </div>
           </div>
+        </Segment>
 
-          {/* Beats 4, 5 and 6. Ordered after the panel layer so the stacked
-              reduced-motion fallback reads in beat order top to bottom. */}
+        {afterPivot}
+
+        <Segment innerRef={corridorSegRef} index={2} label="corridor">
           <PullbackCopy ref={pullbackRef} />
           <NumberBeat ref={numberRef} countRef={countRef} />
-          <OfferBeat ref={offerRef} />
-        </div>
+        </Segment>
+
+        {afterCorridor}
       </div>
     </MotionConfig>
   );

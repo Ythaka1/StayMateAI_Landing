@@ -2,6 +2,7 @@ import * as THREE from "three";
 import {
   ROOM_ATLAS_COLS,
   ROOM_ATLAS_ROWS,
+  loadStockTexture,
   makeGrainTexture,
   makePrintTexture,
   makeRoomsTexture,
@@ -163,6 +164,12 @@ const vertexShader = /* glsl */ `
 const fragmentShader = /* glsl */ `
   uniform sampler2D uGrain;
   uniform sampler2D uPrint;
+  // The card stock, off the real photograph. Zero-mean detail around 0.5;
+  // see loadStockTexture in textures.ts for why it is a detail map and not
+  // the photograph itself.
+  uniform sampler2D uStock;
+  uniform float uStockAmt;    // 0 until (or unless) the photograph loads
+  uniform float uStockRepeat;
   uniform float uGrainRepeat;
   uniform float uFlat;     // 0 = lit card, 1 = flat exact-hex paper field
   uniform float uGlass;    // fresnel rim + deboss chroma. 0 below 768px.
@@ -240,9 +247,25 @@ const fragmentShader = /* glsl */ `
     if (cardA <= 0.002 && deskLive <= 0.002) discard;
 
     // ── The card ─────────────────────────────────────────────────────────
-    // Tiling grain: one sample, octaves baked into the tile.
+    // Two surface samples, at two scales, and they are not redundant:
+    //
+    //   stock — the photographed card, at a low repeat. This is the stock's
+    //           actual character: fibre clumping, fleck, the unevenness that
+    //           no amount of value noise convincingly fakes.
+    //   grain — the procedural tile, at 10–90 repeats depending on viewport.
+    //           This is what still has tooth at maximum push-in, where the
+    //           camera is looking at millimetres of card and the photograph
+    //           has long since gone soft.
+    //
+    // COST: one extra texture read in every variant, including the lean one
+    // that the pivot uses — which is the beat where fill rate decides the
+    // frame. It is taken deliberately: the pivot is the exact moment the
+    // surface is being examined, so it is the one place the photograph earns
+    // its sample. uStockAmt is 0, and the sample therefore free of visual
+    // consequence, if the photograph never loads.
     float grain = texture2D(uGrain, cuv * uGrainRepeat).r - 0.5;
-    vec3 tint = uPaper * (1.0 + grain * 0.05);
+    float stock = (texture2D(uStock, cuv * uStockRepeat).r - 0.5) * uStockAmt;
+    vec3 tint = uPaper * (1.0 + grain * 0.05 + stock * 0.14);
 
     vec3 col = tint;
     float deboss = 0.0;
@@ -285,7 +308,10 @@ const fragmentShader = /* glsl */ `
     // a grey-brown midtone or leaves a visible spotlight terminator arc.
     float dist = distance(vWorld, uLightPos);
     float atten = 1.0 - smoothstep(uLightNear, uLightFar, dist);
-    float relief = 1.0 + grain * 0.14 * atten;
+    // The key light rakes across the surface, so the stock's relief is only
+    // visible where the light actually reaches — which is what makes it read
+    // as texture on an object rather than as a pattern printed on one.
+    float relief = 1.0 + (grain * 0.14 + stock * 0.26) * atten;
     vec3 lit = mix(uShadow, col * uWarm, atten) * relief;
 
     // Soft bounce up off the desk as the card lands. The other half of what
@@ -318,7 +344,11 @@ const fragmentShader = /* glsl */ `
   #endif
 
     // Handoff ramp: resolve to an exact flat paper field plus paper grain.
-    vec3 flatField = uPaper * (1.0 + grain * 0.045);
+    // The stock is present here too, but at a fraction of its lit amplitude:
+    // this frame has to average to the exact --paper hex the DOM layer
+    // cross-fades in over, and anything with a mean offset would show as a
+    // seam at the one moment there is nothing else on screen to look at.
+    vec3 flatField = uPaper * (1.0 + grain * 0.045 + stock * 0.05);
     vec3 cardCol = mix(lit, flatField, uFlat);
 
     gl_FragColor = vec4(mix(deskCol, cardCol, cardA), 1.0);
@@ -401,9 +431,33 @@ export function createCardScene(
     dirty = true;
   });
 
+  /*
+   * The card stock, off card.png. Loaded asynchronously and switched in when
+   * it arrives — there is no loading screen on this site and the opening
+   * frame must not wait on a photograph. Until then (and permanently, if the
+   * file is not there) uStockAmt is 0 and the card is procedural cream, which
+   * is what it was before this existed.
+   *
+   * A 1×1 white pixel stands in for the texture in the meantime: a sampler
+   * bound to nothing is undefined behaviour in WebGL and produces black on
+   * some drivers, which through `- 0.5` would darken the whole card.
+   */
+  const stockPlaceholder = new THREE.DataTexture(
+    new Uint8Array([128, 128, 128, 255]),
+    1,
+    1
+  );
+  stockPlaceholder.needsUpdate = true;
+
   const uniforms: Record<string, THREE.IUniform> = {
       uGrain: { value: grain },
       uPrint: { value: print },
+      uStock: { value: stockPlaceholder },
+      uStockAmt: { value: 0 },
+      // Low, because this is the stock's character rather than its tooth —
+      // the tooth is uGrainRepeat's job. Mirrored wrapping means the folds
+      // this creates are not visible.
+      uStockRepeat: { value: 3.0 },
       uGrainRepeat: { value: 16.0 }, // set from the viewport in setSize
       uFlat: { value: 0 },
       uGlass: { value: 0 },
@@ -439,6 +493,18 @@ export function createCardScene(
     },
     uInk: { value: new THREE.Color("#15171b") },
   };
+
+  // Switched in whenever it arrives. Nothing waits on it.
+  let stock: THREE.Texture | null = null;
+  const cancelStock = loadStockTexture("/media/card.png", (tex) => {
+    tex.anisotropy = isMobile
+      ? 1
+      : Math.min(4, renderer.capabilities.getMaxAnisotropy());
+    stock = tex;
+    uniforms.uStock.value = tex;
+    uniforms.uStockAmt.value = 1;
+    dirty = true;
+  });
 
   /*
    * Three compiled variants of the same shader, sharing one uniforms object.
@@ -984,16 +1050,28 @@ export function createCardScene(
       running = false;
       if (DEBUG) stageDebug.looping = false;
       cancelAnimationFrame(raf);
+      // One last frame at the progress that was just set, before the loop
+      // goes away. Without it the canvas keeps whatever the loop happened to
+      // render last, which is only harmless when the sleep was reached by
+      // scrolling — arrive at a sleeping stretch in one jump (a restored
+      // scroll position, an in-page anchor) and the stale frame can be from
+      // the wrong side of a lighting change entirely.
+      render(performance.now());
     },
     dispose() {
       cancelAnimationFrame(raf);
       running = false;
+      // In flight when the scene goes away — otherwise the decode finishes
+      // into a renderer that no longer exists.
+      cancelStock();
       mesh.geometry.dispose();
       rich.dispose();
       deskOnly.dispose();
       lean.dispose();
       grain.dispose();
       print.dispose();
+      stockPlaceholder.dispose();
+      stock?.dispose();
       roomsTex.dispose();
       rooms.dispose();
       renderer.dispose();

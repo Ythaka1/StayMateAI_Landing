@@ -1,24 +1,35 @@
 /*
  * The stage's scroll timeline.
  *
- * Beats 1, 2 and 3 share one sticky section, one canvas and one camera path,
- * so there is a single global progress value (0–1 across the whole spacer).
- * Every range that consumes it lives here, which is what keeps the canvas,
- * the copy layers and the DOM panel track from ever drifting apart.
+ * The six 3D beats share one camera path and one global progress value
+ * (0–1 across the whole path). Every range that consumes it lives here,
+ * which is what keeps the canvas, the copy layers and the DOM panel track
+ * from ever drifting apart.
+ *
+ * Since pass 04 that one path is no longer one scroll spacer. The 3D is
+ * punctuation now: it is cut into three segments (see SEGMENTS below) with
+ * flat photographic sections between them. The camera path itself is
+ * untouched — each segment maps its own 0–1 scroll progress into its slice
+ * of the same global 0–1, so the three segments read as one continuous move
+ * interrupted, not as three separate animations.
  *
  * Beat 3's internal ranges (DOLLY, FLATTEN, FADE, PANELS_TRAVEL) are still
  * expressed against the pivot's own 0–1 progress, unchanged from pass 01;
  * `pivotProgress()` maps global → pivot so those numbers stay as tuned.
  */
 
-/** Section heights, in svh. The spacer is their sum. */
+/** Section heights, in svh. */
 export const BEAT_VH = {
   darkness: 110,
   descent: 260,
   pivot: 500,
   pullback: 340,
   number: 220,
-  fan: 300,
+  // Was 300 while the pilot offer was rendered over the fan. The offer is a
+  // flat section now (section 9), so this beat carries no copy at all — it
+  // is the last held frame of the 3D and nothing more, and only needs enough
+  // travel for the fan to finish settling before the plans scroll over it.
+  fan: 120,
 } as const;
 
 export const STAGE_HEIGHT_VH =
@@ -68,6 +79,51 @@ export const NUMBER = {
 
 /** Beat 6: the light returns, the cards fan out, everything comes to rest. */
 export const FAN = { start: NUMBER.end, end: 1 } as const;
+
+// ── The three 3D segments ──────────────────────────────────────────────────
+
+/**
+ * The camera path, cut into the three places the site actually shows it.
+ * `start`/`end` are slices of the same global 0–1 and are contiguous, so the
+ * frame a segment ends on is the frame the next one opens on — which is why
+ * the cuts read as a held breath rather than a jump.
+ *
+ * `vh` is that segment's scroll travel. The spacer is `vh + 100svh` tall
+ * because the sticky child is one viewport high, so travel = height − 100svh.
+ *
+ * The split points are chosen where the camera is already still: the end of
+ * the descent (the card landed and at rest) and the end of the pivot (the
+ * frame is a flat cream field). Cutting anywhere the camera is moving would
+ * show as a stutter when the next segment resumes.
+ */
+export const SEGMENTS = [
+  {
+    id: "descent",
+    start: DARKNESS.start,
+    end: PIVOT.start,
+    vh: BEAT_VH.darkness + BEAT_VH.descent,
+  },
+  {
+    id: "pivot",
+    start: PIVOT.start,
+    end: PIVOT.end,
+    vh: BEAT_VH.pivot,
+  },
+  {
+    id: "corridor",
+    start: PIVOT.end,
+    end: FAN.end,
+    vh: BEAT_VH.pullback + BEAT_VH.number + BEAT_VH.fan,
+  },
+] as const;
+
+export type SegmentId = (typeof SEGMENTS)[number]["id"];
+
+/** A segment's own 0–1 scroll progress → global camera progress. */
+export const globalFromSegment = (index: number, local: number) => {
+  const s = SEGMENTS[index];
+  return s.start + local * (s.end - s.start);
+};
 
 const descentSpan = DESCENT.end - DESCENT.start;
 const pullbackSpan = PULLBACK.end - PULLBACK.start;
@@ -127,18 +183,19 @@ export const PANEL_COUNT = 4;
 // ── Beats 4–6, against global progress ─────────────────────────────────────
 
 /**
- * The DOM panel layer fading back down — the mirror of FADE, and the same 8%
- * of a beat. The canvas loop resumes at PANEL_OUT.start, i.e. before this
- * begins, exactly as it does on the way in.
- */
-export const PANEL_OUT = lerpRange(PULLBACK, 0, 0.09);
-
-/**
  * The camera retraces beat 3's dolly, backwards, to the frame beat 2 ended
  * on. It is driven through the very same dollyAt()/FLATTEN code by running a
  * pivot-equivalent progress back down — see canvasPivotProgress().
  */
-export const RETURN = lerpRange(PULLBACK, 0, 0.44);
+/*
+ * Tightened from 0.44 in pass 04. This retrace used to begin under an opaque
+ * cream DOM layer that was fading down over it, so its first half being a
+ * featureless cream field cost nothing — there was something else on top of
+ * it. Now the corridor segment opens cold on this frame, straight out of a
+ * dark flat section, and every scroll pixel spent before the card is
+ * recognisable is a blank white screen. Half the distance, same move.
+ */
+export const RETURN = lerpRange(PULLBACK, 0, 0.24);
 
 /** Then it keeps going, and the array of cards comes with it. */
 export const RECEDE = lerpRange(PULLBACK, 0.4, 1);
@@ -185,9 +242,17 @@ export const CANVAS_DARK = {
   end: LIGHTS_UP.start,
 } as const;
 
-/** True where the RAF loop should be fully stopped, not merely invisible. */
-export const canvasAsleep = (g: number) => {
-  const inPanels = pivotProgress(g) >= CANVAS_SLEEP_AT && g < PANEL_OUT.start;
+/**
+ * True where the RAF loop should be fully stopped, not merely invisible.
+ *
+ * Takes the segment as well as the progress because the two ends of the cut
+ * at PIVOT.end share a progress value but not a state: the pivot segment
+ * finishes behind an opaque panel layer (asleep), while the corridor segment
+ * opens on that same frame with the panel layer gone (awake, and about to
+ * dolly back out). Deriving this from `g` alone cannot tell them apart.
+ */
+export const canvasAsleep = (g: number, segment: SegmentId) => {
+  const inPanels = segment === "pivot" && pivotProgress(g) >= CANVAS_SLEEP_AT;
   const inDark = g >= CANVAS_DARK.start && g < CANVAS_DARK.end;
   return inPanels || inDark;
 };
@@ -238,13 +303,18 @@ export const COPY_NUMBER = {
   out: lerpRange(NUMBER, 0.88, 1),
 } as const;
 
-/** Beat 6's pilot offer, which arrives with the light and then stays. */
-export const COPY_OFFER = {
-  in: lerpRange(FAN, 0.3, 0.46),
-  out: { start: 1.5, end: 2 }, // never — this is the close
-} as const;
+/*
+ * Beat 6 has no copy layer. The pilot offer used to be rendered over the fan;
+ * it is section 9 now, a flat section after the 3D has finished. The fan is
+ * punctuation — it ends the last segment and hands off to the plans.
+ */
 
-/** The nav fades in only once beat 1 has released the opening frame. */
+/**
+ * The nav fades in only once beat 1 has released the opening frame, so the
+ * first thing on screen is the card and nothing else. It never fades back
+ * out — see the latch in Stage, which is what keeps it on through the flat
+ * sections, where nothing is writing this value at all.
+ */
 export const NAV_IN = {
   in: { start: DARKNESS.end * 0.8, end: DARKNESS.end * 1.25 },
   out: { start: 1.5, end: 2 },
@@ -276,9 +346,11 @@ export const globalFromPivot = (pp: number) =>
 export const band = (g: number, b: { in: Range; out: Range }) =>
   within(g, b.in) * (1 - within(g, b.out));
 
-/** Global progress at which panel i (0-based) is centred in the frame. */
+/**
+ * The pivot segment's own 0–1 progress at which panel i (0-based) is centred.
+ * Segment-local rather than global, because the thing that has to be scrolled
+ * is the pivot segment's spacer.
+ */
 export const progressForPanel = (i: number) =>
-  globalFromPivot(
-    PANELS_TRAVEL.start +
-      (PANELS_TRAVEL.end - PANELS_TRAVEL.start) * (i / (PANEL_COUNT - 1))
-  );
+  PANELS_TRAVEL.start +
+  (PANELS_TRAVEL.end - PANELS_TRAVEL.start) * (i / (PANEL_COUNT - 1));

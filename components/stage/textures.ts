@@ -18,6 +18,153 @@ import * as THREE from "three";
  * ──────────────────────────────────────────────────────────────────────────
  */
 
+/**
+ * The card stock, taken off the real photograph.
+ *
+ * ── Why not just map card.png onto the card ───────────────────────────────
+ * The photograph is a lit object in a room: a tent card at an angle under a
+ * brass lamp, on walnut, with the background around it. Mapped straight onto
+ * the card UV it would bring three things the scene already has and cannot
+ * have twice — a light with its own direction, a perspective the camera is
+ * not at, and a table it is not on. The card would read as a photograph of a
+ * card stuck to a card.
+ *
+ * So what is taken from it is the only part that is actually the stock: an
+ * interior crop of the front panel, with its lighting divided out, leaving a
+ * zero-mean detail map of real fibre, tooth and fleck. That is what the
+ * shader multiplies the paper colour by.
+ *
+ * Two consequences worth being explicit about:
+ *
+ *  - The paper *colour* still comes from --paper, not from the photograph.
+ *    The FLATTEN ramp at the end of the pivot has to resolve to the exact hex
+ *    the DOM panel layer uses, or the handoff seam becomes visible. Sampling
+ *    the cream out of a lamplit photograph would put a warm cast on one side
+ *    of that seam.
+ *  - The tiling grain stays, at a much higher repeat. The photograph is
+ *    finite: at maximum push-in the camera is looking at a few millimetres of
+ *    card and the crop has gone soft. The procedural tile is what still has
+ *    tooth at that range. The photograph carries the character; the grain
+ *    carries the resolution.
+ *
+ * Mirrored wrapping rather than plain repeat: the crop is not seamless and
+ * never can be, and mirroring turns every seam into a fold, which on an
+ * isotropic material like paper is invisible.
+ *
+ * Fails soft. If the file is missing the promise rejects, `onReady` is never
+ * called, uStockAmt stays at 0 and the card is exactly what it was before —
+ * procedural grain on flat cream.
+ */
+export function loadStockTexture(
+  url: string,
+  onReady: (tex: THREE.Texture) => void
+): () => void {
+  const img = new Image();
+  let cancelled = false;
+
+  img.onload = () => {
+    if (cancelled) return;
+    try {
+      onReady(buildStock(img));
+    } catch {
+      /* leave the card procedural */
+    }
+  };
+  img.onerror = () => {
+    /* leave the card procedural */
+  };
+  img.src = url;
+
+  return () => {
+    cancelled = true;
+    img.onload = null;
+    img.onerror = null;
+  };
+}
+
+/**
+ * Interior of the front panel, in fractions of the photograph. Well inside
+ * the die-cut edge on every side, and above the deckle, so nothing but stock
+ * is in the crop.
+ */
+const STOCK_CROP = { x: 0.3, y: 0.3, w: 0.34, h: 0.38 } as const;
+
+function buildStock(img: HTMLImageElement): THREE.Texture {
+  const S = 512;
+  // Padding so the blur has real pixels to sample outside the region that is
+  // actually read. Canvas blur treats off-canvas as transparent black, which
+  // would leave a bright rim in the difference — the border being brighter
+  // than the middle is exactly the artefact this whole function exists to
+  // remove.
+  const P = 48;
+  const N = S + P * 2;
+
+  const src = document.createElement("canvas");
+  src.width = N;
+  src.height = N;
+  const sctx = src.getContext("2d")!;
+  sctx.drawImage(
+    img,
+    STOCK_CROP.x * img.naturalWidth,
+    STOCK_CROP.y * img.naturalHeight,
+    STOCK_CROP.w * img.naturalWidth,
+    STOCK_CROP.h * img.naturalHeight,
+    0,
+    0,
+    N,
+    N
+  );
+
+  const blurred = document.createElement("canvas");
+  blurred.width = N;
+  blurred.height = N;
+  const bctx = blurred.getContext("2d")!;
+  // Wide enough to carry the lamp falloff and the fold's shading, narrow
+  // enough to leave the fibre behind. Anything under ~16px starts eating the
+  // clumping that makes the stock look like stock.
+  bctx.filter = "blur(26px)";
+  bctx.drawImage(src, 0, 0);
+
+  const a = sctx.getImageData(P, P, S, S).data;
+  const b = bctx.getImageData(P, P, S, S).data;
+
+  const out = document.createElement("canvas");
+  out.width = S;
+  out.height = S;
+  const octx = out.getContext("2d")!;
+  const detail = octx.createImageData(S, S);
+
+  // Rec. 601 luma is deliberate: the crop is near-neutral cream, so the exact
+  // coefficients matter far less than being consistent, and the shader only
+  // reads .r anyway.
+  const luma = (d: Uint8ClampedArray, i: number) =>
+    d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+
+  // The difference between a photograph and its own blur is small — a few
+  // levels out of 255. Without a gain the map is a flat grey and the card
+  // looks like plastic.
+  const GAIN = 2.4;
+
+  for (let i = 0; i < a.length; i += 4) {
+    const d = (luma(a, i) - luma(b, i)) * GAIN;
+    const v = Math.max(0, Math.min(255, Math.round(128 + d)));
+    detail.data[i] = v;
+    detail.data[i + 1] = v;
+    detail.data[i + 2] = v;
+    detail.data[i + 3] = 255;
+  }
+  octx.putImageData(detail, 0, 0);
+
+  const tex = new THREE.CanvasTexture(out);
+  tex.wrapS = THREE.MirroredRepeatWrapping;
+  tex.wrapT = THREE.MirroredRepeatWrapping;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = true;
+  tex.needsUpdate = true;
+  return tex;
+}
+
 /** Deterministic PRNG so the QR block is stable across reloads. */
 function mulberry32(seed: number) {
   let a = seed >>> 0;
