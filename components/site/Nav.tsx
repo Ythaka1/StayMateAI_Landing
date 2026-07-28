@@ -24,18 +24,26 @@ export const Nav = forwardRef<HTMLElement>(function Nav(_, ref) {
         "pointer-events-none fixed inset-x-0 top-0 z-40",
         "flex items-center justify-between px-6 py-5 sm:px-10",
         "opacity-0 motion-reduce:opacity-100",
+        // The bar has no fill and no border, so its type has to survive
+        // whatever scrolls under it, and this site runs near-black sections
+        // straight into cream ones. Difference blending against white gives
+        // near-black over the cream and near-white over the night, from one
+        // rule, with no JS watching what is currently beneath it. The nav is
+        // held at zero for the whole hero, so it never has to resolve against
+        // the photographic plate.
+        "mix-blend-difference",
       ].join(" ")}
       data-site="nav"
     >
       <a
         href="#top"
-        className="pointer-events-auto font-display text-[0.9375rem] tracking-[0.2em] text-paper/90"
+        className="pointer-events-auto font-display text-[0.9375rem] tracking-[0.2em] text-white"
       >
         STAYMATE
       </a>
       <a
         href={WHATSAPP_HREF}
-        className="pointer-events-auto font-body text-[0.8125rem] text-paper/70 underline-offset-4 transition-colors hover:text-paper hover:underline"
+        className="pointer-events-auto font-body text-[0.8125rem] text-white/75 underline-offset-4 transition-colors hover:text-white hover:underline"
       >
         The pilot
       </a>
