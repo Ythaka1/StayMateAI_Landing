@@ -31,7 +31,7 @@ const INCLUDED = [
   "every language",
   "booking capture",
   "the staff screen",
-  "the handoff to a human",
+  "the handoff to a person",
 ];
 
 type Plan = {
@@ -99,8 +99,8 @@ export function Plans() {
           </h2>
           <p className="mt-6 font-body text-[0.9375rem] leading-relaxed text-paper/60">
             Every plan includes {INCLUDED.slice(0, -1).join(", ")} and{" "}
-            {INCLUDED.at(-1)}. The tiers differ on how many rooms and how many
-            properties — nothing that makes the product work is held back.
+            {INCLUDED.at(-1)}. The tiers differ only on how many rooms and how
+            many properties. Nothing that makes the product work is held back.
           </p>
         </div>
 

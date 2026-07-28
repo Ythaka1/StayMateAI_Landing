@@ -41,7 +41,7 @@ export function TypeSlab() {
         />
         <Reveal
           as="p"
-          text="The questions your front desk answers forty times a day — answered instantly, in the guest's own language, at any hour."
+          text="The questions your front desk answers forty times a day, answered the moment they are asked, in the language they were asked in, at any hour."
           // Starts as the headline's last word lands, so the two read as one
           // gesture rather than two reveals stacked.
           delayMs={420}

@@ -57,13 +57,13 @@ const ANSWERS: Answer[] = [
     chip: "Where's the pool?",
     question: "Where's the pool?",
     reply:
-      "Rooftop, level six. It's open from 6am until 9pm. Towels are stacked by the loungers, so there's no need to carry any up from your room.",
+      "Rooftop, level six. Open from 6am until 9pm. Towels are stacked by the loungers, so there is no need to bring one up from the room.",
   },
   {
     chip: "Breakfast times",
     question: "What time is breakfast?",
     reply:
-      "Breakfast runs 6:30 to 10:30 in the courtyard on the ground floor. Room service serves the same menu until 11 if you'd rather not come down.",
+      "Breakfast is served from 6:30 until 10:30 in the courtyard, on the ground floor. Room service carries the same menu until 11, if you would rather not come down.",
   },
   {
     chip: "Book me a massage",
@@ -71,17 +71,17 @@ const ANSWERS: Answer[] = [
     reply: "The spa has one slot left tonight.",
     offer: {
       title: "Deep tissue, 60 minutes",
-      detail: "Tonight at 7:30pm, spa on the second floor.",
+      detail: "Tonight at 7:30, in the spa on the second floor.",
       price: "4,500",
       action: "Add to my stay",
     },
-    note: "In a real stay this goes straight onto the room account. Here it is a demonstration — pressing it books nothing.",
+    note: "In a real stay this goes straight onto the room account. Here it is a demonstration, and pressing it books nothing.",
   },
   {
     chip: "What's nearby?",
     question: "What's nearby?",
     reply:
-      "Five minutes on foot: the old market, two cafés and a pharmacy that stays open late. Fifteen by car: the botanical gardens. I can call you a taxi whenever you want one.",
+      "Five minutes on foot, the old market, two cafés and a pharmacy that keeps late hours. Fifteen by car, the botanical gardens. I can call you a taxi whenever you would like one.",
   },
 ];
 
@@ -141,8 +141,8 @@ export function AskIt() {
           <Reveal as="span" text="Ask it something." className="block" />
         </h2>
         <p className="mt-4 max-w-[30rem] font-body text-[0.9375rem] leading-relaxed text-muted">
-          This is the concierge, not a picture of it. Pick a question — the
-          answers are the ones your property would have loaded.
+          This is the concierge itself, not a picture of it. Choose a question.
+          The answers are the ones your property would have written.
         </p>
 
         {/* The chips. Real buttons, in the tab order, operated by Enter and
@@ -255,15 +255,14 @@ export function AskIt() {
 
                 {pressed ? (
                   <p className="mt-3 font-body text-[0.8125rem] leading-relaxed text-brass">
-                    Nothing was booked — this page has no connection to a
-                    property.
+                    Nothing was booked. This page is not connected to a property.
                   </p>
                 ) : null}
               </div>
             </div>
           ) : (
             <p className="font-body text-[0.9375rem] leading-relaxed text-muted">
-              Pick a question above.
+              Choose a question above.
             </p>
           )}
         </div>

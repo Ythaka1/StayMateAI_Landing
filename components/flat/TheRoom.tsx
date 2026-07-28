@@ -62,7 +62,7 @@ const PANELS = [
     question: "Where's the pool?",
     lines: [
       "Rooftop, level six. Open 6am to 9pm.",
-      "Towels are by the loungers — nothing to carry up.",
+      "Towels are by the loungers, so there is nothing to carry up.",
     ],
   },
   {
@@ -72,7 +72,7 @@ const PANELS = [
     question: "When's breakfast?",
     lines: [
       "6:30 to 10:30, in the courtyard on the ground floor.",
-      "Room service runs the same menu until 11.",
+      "Room service carries the same menu until 11.",
     ],
   },
   {
@@ -82,7 +82,7 @@ const PANELS = [
     question: "Anywhere I can get a massage?",
     lines: [
       "Deep tissue or aromatherapy, sixty minutes.",
-      "Two slots left tonight — 7:30 and 9:00.",
+      "Two appointments left tonight, at 7:30 and at 9:00.",
     ],
   },
 ] as const;

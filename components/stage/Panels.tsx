@@ -83,8 +83,8 @@ export function PanelQuestion() {
         “Anywhere I can get a massage tonight?”
       </h2>
       <p className="mt-6 max-w-[22rem] font-body text-[0.9375rem] leading-relaxed text-muted">
-        Typed four seconds after scanning the card on the desk. No app to
-        download, no front desk to call.
+        Typed four seconds after scanning the card on the desk. Nothing to
+        download, and no front desk to call.
       </p>
     </>
   );
@@ -102,8 +102,8 @@ export function PanelAnswer() {
           Deep tissue, 60 minutes
         </p>
         <p className="mt-2 font-body text-[0.8125rem] leading-relaxed text-muted">
-          The one people book after a long flight — shoulders, neck and lower
-          back. Second floor, 7:30pm.
+          The one people book after a long flight: shoulders, neck and lower
+          back. Second floor, 7:30.
         </p>
       </div>
       <p className="mt-5 font-body text-[0.8125rem] leading-relaxed text-muted">
@@ -123,7 +123,7 @@ export function PanelOffer() {
           Deep tissue, 60 minutes
         </h3>
         <p className="mt-2 font-body text-[0.875rem] leading-relaxed text-muted">
-          Tonight at 7:30pm, spa on the second floor.
+          Tonight at 7:30, in the spa on the second floor.
         </p>
         <div className="mt-5 flex items-center justify-between gap-4">
           <span className="font-body text-lg font-semibold tabular-nums text-felt">

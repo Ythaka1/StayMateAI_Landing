@@ -17,10 +17,10 @@ import { WHATSAPP_HREF } from "@/lib/contact";
 
 const TERMS = [
   "No contract, no card, nothing to sign.",
-  "Send a menu — the content gets loaded for you.",
-  "Room cards printed and delivered.",
-  "Staff learn one screen, which takes four minutes.",
-  "After thirty days, keep it or take the cards out.",
+  "Send us a menu, and the content is loaded for you.",
+  "Room cards printed and delivered to the door.",
+  "Your staff learn one screen, which takes four minutes.",
+  "After thirty days, keep it, or take the cards off the desks.",
 ];
 
 export function Pilot() {

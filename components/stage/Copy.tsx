@@ -81,15 +81,18 @@ export const DescentCopy = forwardRef<HTMLDivElement>(function DescentCopy(
     >
       <div className="mx-auto w-full max-w-[34rem] text-center">
         <h2 className="font-display text-[clamp(1.35rem,4.6vw,1.85rem)] leading-snug text-paper">
-          A guest scans it and asks for whatever they need.
+          A guest scans it, and asks for whatever they need.
         </h2>
         <p className="mt-4 font-body text-[0.9375rem] leading-relaxed text-paper/60">
-          StayMate answers, books it, and puts it on the room — at any hour,
-          without anyone at the desk.
+          StayMate answers, takes the booking, and puts it on the room. At any
+          hour, with nobody at the desk.
         </p>
-        <p className="mt-7 font-body text-[0.9375rem] leading-relaxed text-brass">
-          Your guest writes in German. It answers in German.
-        </p>
+        {/*
+          The line naming German has been removed. Section 6 turns the same
+          question through eight languages, which makes the point without
+          picking one, and naming a single language quietly undersells what
+          the thing does.
+        */}
       </div>
     </div>
   );
@@ -111,8 +114,9 @@ export const PullbackCopy = forwardRef<HTMLDivElement>(function PullbackCopy(
           One card in every room, answering all of them at once.
         </h2>
         <p className="mt-4 font-body text-[0.9375rem] leading-relaxed text-paper/60">
-          The same card, printed once per room. Nothing to install, nothing on
-          the wall, nothing for housekeeping to charge overnight.
+          The same card, printed once for each room. Nothing to install,
+          nothing fixed to a wall, and nothing for housekeeping to put on
+          charge overnight.
         </p>
       </div>
     </div>
