@@ -1,29 +1,36 @@
 import type { Metadata } from "next";
-import { Fraunces, Archivo } from "next/font/google";
+import { Newsreader, Public_Sans } from "next/font/google";
 import "./globals.css";
 
 /*
- * Type: Fraunces for display — a soft "old-style-ish" serif with real
- * letterpress character (variable optical size), which is exactly what a
- * cream table tent wants. Archivo for body — a quiet grotesque that stays
- * out of the way and reads cleanly at app-UI sizes on the phone layer.
- * Deliberately not Inter, not Playfair, not Cormorant.
+ * Newsreader for display. An editorial old style serif: proper stress, sober
+ * proportions, and none of the wonk that made Fraunces read as a design
+ * exercise rather than as a hotel. It has a real optical size axis, which is
+ * the reason to choose it here specifically, because this site sets the same
+ * face at 0.9rem in a plans table and at 4.5rem across a hero. Requesting
+ * `opsz` lets the browser pick the drawing rather than scaling one drawing,
+ * so the large settings keep their fine hairlines and the small ones do not
+ * fall apart.
+ *
+ * Public Sans for body. Quiet, neutral, slightly narrow, and it sits properly
+ * underneath a serif at small sizes without competing with it. Deliberately
+ * not Inter.
  */
-const fraunces = Fraunces({
+const newsreader = Newsreader({
   subsets: ["latin"],
-  variable: "--font-fraunces",
+  variable: "--font-newsreader",
   axes: ["opsz"],
 });
 
-const archivo = Archivo({
+const publicSans = Public_Sans({
   subsets: ["latin"],
-  variable: "--font-archivo",
+  variable: "--font-public-sans",
 });
 
 export const metadata: Metadata = {
-  title: "StayMate — the concierge on the desk",
+  title: "StayMate, the concierge on the desk",
   description:
-    "A QR-triggered AI concierge for boutique hotels. One card on the desk, every guest question answered.",
+    "A QR triggered concierge for boutique hotels. One card on the desk, and every guest question answered.",
 };
 
 export default function RootLayout({
@@ -34,7 +41,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${fraunces.variable} ${archivo.variable} antialiased`}
+      className={`${newsreader.variable} ${publicSans.variable} antialiased`}
     >
       <body>{children}</body>
     </html>

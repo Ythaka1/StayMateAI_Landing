@@ -329,7 +329,7 @@ export function makeRoomsTexture(onRedraw?: () => void): THREE.Texture {
  */
 function displayFamily(): string {
   const v = getComputedStyle(document.documentElement)
-    .getPropertyValue("--font-fraunces")
+    .getPropertyValue("--font-newsreader")
     .trim();
   return v ? `${v}, serif` : "serif";
 }

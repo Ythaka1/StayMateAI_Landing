@@ -20,8 +20,8 @@
   --color-brass: var(--brass);
   --color-muted: var(--muted);
   --color-night: var(--night);
-  --font-display: var(--font-fraunces);
-  --font-body: var(--font-archivo);
+  --font-display: var(--font-newsreader);
+  --font-body: var(--font-public-sans);
 }
 
 /*
@@ -39,7 +39,7 @@ html {
 body {
   background: transparent;
   color: var(--ink);
-  font-family: var(--font-archivo), system-ui, sans-serif;
+  font-family: var(--font-public-sans), system-ui, sans-serif;
 }
 
 /* Lenis recommends this on the root while smooth scroll is active. */
