@@ -275,10 +275,37 @@ export const canvasPivotProgress = (g: number) =>
 
 // ── Copy layers, against global progress ────────────────────────────────────
 
-/** Beat 1's single low line. */
-export const COPY_DARKNESS = {
-  in: { start: 0.006, end: 0.028 },
-  out: { start: 0.078, end: 0.118 },
+/**
+ * The hero: the wordmark and the one line.
+ *
+ * It arrives sooner and leaves later than the single low line it replaced,
+ * because it is now the whole opening composition rather than a caption
+ * under a floating object. It is fully up before the card has moved at all
+ * and it is gone before the descent has properly started.
+ */
+export const COPY_HERO = {
+  // Already at full before the page has been scrolled at all. The line this
+  // replaced faded in from scroll, which was survivable for one small
+  // caption and is not survivable for the whole opening composition: at
+  // scroll zero, which is where every visitor starts, the frame had no
+  // wordmark in it. The hero's own entrance is a CSS animation on its
+  // children instead, so it plays on load rather than on input.
+  in: { start: -0.02, end: -0.01 },
+  out: { start: 0.05, end: 0.082 },
+} as const;
+
+/**
+ * How much of the cursor parallax applies. Full while the card is standing
+ * in the room, and retired as the descent takes over: once the card is
+ * falling, scroll owns it completely and a pointer nudging the camera would
+ * be two hands on the same object.
+ *
+ * Consumers multiply by this, so at 0 every parallax term is exactly zero
+ * and the camera path is bit-identical to the path with no pointer at all.
+ */
+export const PARALLAX_OUT = {
+  start: DARKNESS.end * 0.75,
+  end: DARKNESS.end + (DESCENT.end - DESCENT.start) * 0.12,
 } as const;
 
 /**
@@ -310,14 +337,31 @@ export const COPY_NUMBER = {
  */
 
 /**
- * The nav fades in only once beat 1 has released the opening frame, so the
- * first thing on screen is the card and nothing else. It never fades back
- * out — see the latch in Stage, which is what keeps it on through the flat
- * sections, where nothing is writing this value at all.
+ * The nav comes up only once the hero wordmark has completely gone.
+ *
+ * `in.start` is COPY_HERO.out.end exactly, not near it. There are two
+ * wordmarks on this site, one enormous and one small, and if their ranges
+ * overlap by even a few percent the result is a crossfade between two sizes
+ * of the same word, which reads as a rendering fault rather than as a
+ * transition. One leaves, then the other arrives.
+ *
+ * It never fades back out; see the latch in Stage, which is what keeps it on
+ * through the flat sections, where nothing is writing this value at all.
  */
 export const NAV_IN = {
-  in: { start: DARKNESS.end * 0.8, end: DARKNESS.end * 1.25 },
+  in: { start: COPY_HERO.out.end, end: COPY_HERO.out.end + 0.018 },
   out: { start: 1.5, end: 2 },
+} as const;
+
+/**
+ * The photographic plate behind the canvas. Full while the card is in the
+ * room, and gone by the time the camera converges on the pivot, because from
+ * there the frame is the card's own surface and a desk behind it would be
+ * showing through a sheet of paper.
+ */
+export const PLATE_OUT = {
+  start: CONVERGE.start,
+  end: CONVERGE.start + (CONVERGE.end - CONVERGE.start) * 0.7,
 } as const;
 
 // ── Helpers ────────────────────────────────────────────────────────────────

@@ -143,31 +143,97 @@ html.lenis body {
 }
 
 /* ── The scroll cue ─────────────────────────────────────────────────────────
- * A brass hairline that draws itself downward once and then goes. Not a
- * bouncing chevron: it happens a single time, says "there is more below",
- * and never asks again.
+ * A brass hairline that draws itself downward once and then stays, with
+ * SCROLL beneath it breathing very slowly. Not a bouncing chevron: it says
+ * "there is more below" a single time and then waits, rather than repeating
+ * the request. It is dismissed by the first scroll input, not by a timer, so
+ * anyone who stopped to read the hero still has an invitation when they look
+ * back up. `forwards` matters: the rule has to hold at full height once it
+ * has finished drawing.
  */
 @keyframes rule-draw {
   0% {
     transform: scaleY(0);
     opacity: 0;
   }
-  18% {
-    opacity: 1;
-  }
-  55% {
-    transform: scaleY(1);
+  22% {
     opacity: 1;
   }
   100% {
     transform: scaleY(1);
-    opacity: 0;
+    opacity: 1;
   }
 }
 
 .animate-rule-draw {
   transform-origin: top;
-  animation: rule-draw 3.6s ease-in-out 1.4s forwards;
+  animation: rule-draw 2.2s cubic-bezier(0.22, 0.61, 0.36, 1) 1.2s backwards
+    forwards;
+}
+
+/* Slow enough to read as breathing rather than as blinking. Starts after the
+   rule has drawn, so the word does not pulse before it has arrived. */
+@keyframes cue-pulse {
+  0%,
+  100% {
+    opacity: 0.28;
+  }
+  50% {
+    opacity: 0.72;
+  }
+}
+
+.animate-cue-pulse {
+  animation: cue-pulse 4.5s ease-in-out 3s infinite backwards;
+}
+
+/* ── The hero's entrance ────────────────────────────────────────────────────
+ * The wordmark and the line arrive on load, not on scroll. It has to be an
+ * animation on these two elements rather than on the layer that holds them,
+ * because that layer's opacity is written every frame by the scroll handler
+ * and the two would multiply.
+ *
+ * Slow, and from a blur, so the frame resolves rather than switching on.
+ */
+@keyframes hero-in {
+  from {
+    opacity: 0;
+    filter: blur(9px);
+    transform: translate3d(0, 0.24em, 0);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.animate-hero-in {
+  animation: hero-in 1400ms cubic-bezier(0.22, 0.61, 0.36, 1) 240ms backwards;
+}
+
+/* ── The lamp breathes ──────────────────────────────────────────────────────
+ * Three percent of intensity over eight seconds, on the hero's warm gradient.
+ * It should not be perceptible as movement. It exists so the frame is never
+ * completely frozen, because a hero that holds perfectly still reads as a
+ * screenshot of a hero.
+ *
+ * On opacity rather than on the gradient stops: opacity is composited, so
+ * this costs nothing per frame, where animating a radial-gradient's colour
+ * stops repaints the layer.
+ */
+@keyframes lamp-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.97;
+  }
+}
+
+.animate-lamp-breathe {
+  animation: lamp-breathe 8s ease-in-out infinite;
 }
 
 /*
@@ -177,7 +243,10 @@ html.lenis body {
  */
 @media (prefers-reduced-motion: reduce) {
   .animate-word-rise,
+  .animate-hero-in,
   .animate-rule-draw,
+  .animate-cue-pulse,
+  .animate-lamp-breathe,
   .animate-orbit-spin,
   .animate-orbit-counter {
     animation: none !important;

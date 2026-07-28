@@ -18,48 +18,98 @@ const layerClass = [
   "motion-reduce:py-24",
 ].join(" ");
 
-/** Beat 1 — one line, small, low. Nothing else on screen. */
-export const DarknessCopy = forwardRef<HTMLDivElement>(function DarknessCopy(
-  _,
-  ref
-) {
+/**
+ * Beat 1, the hero.
+ *
+ * Not a line adrift in a void any more. The card stands in a photographed
+ * room (see HeroPlate) and this is the type set into it: the wordmark held
+ * high on the left where the lamp actually falls, and one line low on the
+ * right, in the empty walnut the photograph was composed to leave.
+ *
+ * The two are diagonally opposed and neither is centred, so the card can
+ * stand in the middle of the frame without either of them sharing pixels
+ * with it. Centring anything here would put it straight through the card.
+ *
+ * This is the hero wordmark, not the nav mark. The floating nav is held at
+ * zero for the whole time this is on screen and only comes up once it has
+ * gone; the two are never on screen together and there is no crossfade
+ * between them, because two wordmarks of different sizes dissolving into
+ * each other reads as a mistake.
+ */
+export const HeroCopy = forwardRef<HTMLDivElement>(function HeroCopy(_, ref) {
   return (
     <div
       ref={ref}
-      className={`${layerClass} justify-end pb-[14svh] opacity-0 motion-reduce:justify-start`}
-      data-copy="darkness"
+      className={[
+        "absolute inset-0 px-8 py-10 sm:px-14 sm:py-14",
+        "pointer-events-none select-none opacity-0",
+        "motion-reduce:static motion-reduce:opacity-100",
+        "motion-reduce:min-h-[70svh] motion-reduce:py-24",
+      ].join(" ")}
+      data-copy="hero"
     >
-      {/* text-muted is a colour for cream surfaces; on near-black it reads as
-          barely-there. Everything in these two beats is a tint of paper. */}
-      <p className="mx-auto w-full max-w-[30rem] text-center font-body text-[0.9375rem] leading-relaxed text-paper/55">
-        A card on the desk. That is the whole installation.
+      {/*
+        The entrance is a CSS animation on the children, not a scroll-driven
+        fade on the layer: this has to play on load, and the layer's opacity
+        belongs to the scroll handler.
+      */}
+      <h1 className="animate-hero-in font-display text-[clamp(2.6rem,7.6vw,6rem)] font-normal leading-none tracking-[0.14em] text-paper/95">
+        STAYMATE
+      </h1>
+
+      {/* Lower right, offset from the card. text-paper at low alpha rather
+          than text-muted: muted is a colour for cream surfaces and on walnut
+          it turns to mud. */}
+      <p
+        className={[
+          "absolute bottom-[16svh] right-8 max-w-[19rem] text-right sm:right-14",
+          "animate-hero-in [animation-delay:520ms]",
+          "font-body text-[0.9375rem] leading-relaxed text-paper/60",
+          "motion-reduce:static motion-reduce:mt-10 motion-reduce:text-left",
+        ].join(" ")}
+      >
+        A card on the desk. A concierge behind it.
       </p>
     </div>
   );
 });
 
 /**
- * The scroll cue — a brass hairline that draws itself downward, once.
+ * The scroll cue: a brass hairline with SCROLL set small beneath it.
  *
- * Not a bouncing chevron. A chevron repeats forever, which reads as the page
- * nagging; this happens a single time under the opening line, says there is
- * more below, and is gone. It never returns, including on scroll-back, and
- * under reduced motion it is not shown at all — the animation *is* the
- * message, and a static hairline under the copy would just be a stray rule.
+ * Not a bouncing chevron. It draws itself downward once, then stays, pulsing
+ * so slowly that it reads as breathing rather than as blinking, and it goes
+ * for good on the first scroll input. A cue that vanishes on a timer leaves
+ * anyone who paused to read the hero with no invitation at all; a cue that
+ * bounces forever is the page nagging. This waits, quietly, until it has been
+ * answered.
  *
- * It sits in its own layer rather than inside DarknessCopy because that
- * layer's opacity is written every frame from the scroll handler, which would
- * multiply against the CSS fade and make the timing impossible to reason
- * about.
+ * It lives in its own layer rather than inside HeroCopy because that layer's
+ * opacity is written every frame from the scroll handler, and multiplying a
+ * CSS animation against a scroll-driven opacity makes the timing impossible
+ * to reason about. `data-gone` is set once, from Stage, on the first input.
+ *
+ * Hidden entirely under reduced motion: the drawing *is* the message, and a
+ * static hairline with a word under it is just a stray rule.
  */
-export function ScrollCue() {
+export function ScrollCue({ ref }: { ref?: React.Ref<HTMLDivElement> }) {
   return (
     <div
+      ref={ref}
       aria-hidden="true"
-      className="pointer-events-none absolute inset-x-0 bottom-[6svh] flex justify-center motion-reduce:hidden"
+      className={[
+        "pointer-events-none absolute inset-x-0 bottom-[5svh]",
+        "flex flex-col items-center gap-3",
+        "transition-opacity duration-700 data-[gone=true]:opacity-0",
+        "motion-reduce:hidden",
+      ].join(" ")}
       data-copy="cue"
+      data-gone="false"
     >
-      <span className="animate-rule-draw block h-[7svh] w-px bg-gradient-to-b from-brass/0 via-brass/70 to-brass/0" />
+      <span className="animate-rule-draw block h-[6svh] w-px bg-gradient-to-b from-brass/0 via-brass/70 to-brass/70" />
+      <span className="animate-cue-pulse font-body text-[0.625rem] uppercase tracking-[0.34em] text-paper/45">
+        Scroll
+      </span>
     </div>
   );
 }

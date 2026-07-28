@@ -133,8 +133,29 @@ const RETREAT_Y_REST = 0.6;
 /** Autonomous Y rotation in beat 1: ±6°, ~9s period. */
 const INTRO_AMPLITUDE = (6 * Math.PI) / 180;
 const INTRO_PERIOD_MS = 9000;
-/** How long the intro rotation takes to ease away once the user scrolls. */
-const INTRO_RELEASE_MS = 700;
+/**
+ * How long the intro rotation takes to ease away once the user scrolls.
+ *
+ * 1200ms, up from 700. At 700 the rotation was still visibly moving when it
+ * was cut off, and a movement that stops before it has finished reads as a
+ * bug rather than as a handover. Over 1200 the descent has taken the card by
+ * the time the idle is gone, so the two overlap instead of colliding.
+ */
+const INTRO_RELEASE_MS = 1200;
+
+/**
+ * Cursor tilt on the card, in radians. Added on top of the idle rotation, not
+ * instead of it.
+ */
+const TILT_Y = (4 * Math.PI) / 180;
+const TILT_X = (2 * Math.PI) / 180;
+
+/**
+ * The camera's parallax offset at full pointer deflection, in screen pixels
+ * at the hero framing. Converted to world units per frame, because the world
+ * distance that spans four pixels depends on how far back the camera is.
+ */
+const CAM_PARALLAX_PX = 4;
 
 const vertexShader = /* glsl */ `
   varying vec2 vUv;
@@ -222,6 +243,7 @@ const fragmentShader = /* glsl */ `
     // The shadow tightens and deepens as the card lands. Both fade to the
     // clear colour before the plane's edge, so that edge never shows.
     vec3 deskCol = uNight;
+    float deskA = 0.0;
     float deskLive = 0.0;
   #ifdef DESK
     deskLive = uLanded * (1.0 - cardA);
@@ -237,8 +259,21 @@ const fragmentShader = /* glsl */ `
       // light around it — a card on a surface, rather than a glow.
       float lit = exp(-od * 1.9);
       float occ = exp(-od / mix(0.85, 0.24, uLanded));
-      deskCol = uNight + uDeskWarm * deskLive * below * fade *
-        (lit * 0.42 - occ * 0.38);
+
+      /*
+       * Signed: positive is bounce coming up off the surface, negative is the
+       * contact shadow where the card meets it.
+       *
+       * Since the canvas went transparent this can no longer be "night plus a
+       * term" — night is not ours to paint any more, there is a photograph of
+       * a desk behind this. So the two halves composite instead: the shadow
+       * lays black over the plate at its own strength, and the bounce lays
+       * warm over it at its own. That is what makes the card sit on the
+       * photographed desk rather than in front of it.
+       */
+      float d = deskLive * below * fade * (lit * 0.42 - occ * 0.38);
+      deskCol = d < 0.0 ? vec3(0.0) : uDeskWarm;
+      deskA = clamp(abs(d) * 2.2, 0.0, 1.0);
     }
   #endif
 
@@ -351,7 +386,12 @@ const fragmentShader = /* glsl */ `
     vec3 flatField = uPaper * (1.0 + grain * 0.045 + stock * 0.05);
     vec3 cardCol = mix(lit, flatField, uFlat);
 
-    gl_FragColor = vec4(mix(deskCol, cardCol, cardA), 1.0);
+    // Premultiplied. The card is opaque wherever it covers a fragment; the
+    // desk terms carry only their own strength, so everything outside the
+    // card's silhouette lets the plate behind the canvas through.
+    float a = max(cardA, deskA);
+    vec3 rgb = mix(deskCol * deskA, cardCol, cardA);
+    gl_FragColor = vec4(rgb, a);
   }
 `;
 
@@ -361,6 +401,17 @@ export interface CardScene {
   setSize(width: number, height: number): void;
   /** Ends beat 1's autonomous rotation. Idempotent; it never restarts. */
   releaseIntro(): void;
+  /**
+   * Pointer position, already spring damped, as -1..1 from the centre of the
+   * viewport, plus how much of it should apply right now (1 in the hero, 0
+   * once the descent has taken over).
+   *
+   * At (0, 0) every camera number is bit-identical to what it is without this
+   * call ever having been made: the offset is added, not blended into, the
+   * path, and zero times anything is zero. That is the property the pivot
+   * handoff depends on.
+   */
+  setPointer(x: number, y: number, amount: number): void;
   /** Idempotent. Renders one frame immediately, then keeps the loop alive. */
   start(): void;
   /** Idempotent. Fully stops the RAF loop — not just an opacity-0 canvas. */
@@ -374,16 +425,30 @@ export function createCardScene(
 ): CardScene {
   const { isMobile } = opts;
 
+  /*
+   * Transparent, since pass 06. The hero is a photographed desk in DOM behind
+   * this canvas, and the card has to stand in that room rather than in front
+   * of a black rectangle covering it.
+   *
+   * Nothing else changes colour: everywhere the canvas is not drawing, what
+   * shows through is `html { background: var(--night) }`, which is the same
+   * hex this used to clear to. The pivot's terminal frame is still opaque,
+   * because there the card fills the viewport at alpha 1.
+   *
+   * premultipliedAlpha stays at three's default of true, so the shader
+   * outputs rgb already multiplied by a. Straight alpha through three's
+   * ONE / ONE_MINUS_SRC_ALPHA blend would fringe every edge.
+   */
   const renderer = new THREE.WebGLRenderer({
     canvas,
     antialias: !isMobile,
-    alpha: false,
+    alpha: true,
     powerPreference: "high-performance",
   });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
   renderer.toneMapping = THREE.NoToneMapping;
   renderer.outputColorSpace = THREE.LinearSRGBColorSpace; // i.e. no encode
-  renderer.setClearColor(new THREE.Color(NIGHT), 1);
+  renderer.setClearColor(new THREE.Color(NIGHT), 0);
 
   // ── TEMPORARY diagnostics (?debug=1). Remove with debug.ts. ─────────────
   const DEBUG = debugEnabled();
@@ -675,8 +740,20 @@ export function createCardScene(
     CARD_FLOAT_Z + 1.35
   );
   const KEY_DESK = new THREE.Vector3(-2.1, 1.5, 1.5);
-  const WARM_VOID = new THREE.Color(1.0, 0.99, 0.988);
-  const WARM_DESK = new THREE.Color(1.0, 0.99, 0.972);
+  /*
+   * The key's colour, in the void and on the desk.
+   *
+   * WARM_VOID used to be all but neutral, which was right when the card hung
+   * in black and there was nothing to compare it to. Since pass 06 it stands
+   * in a photograph of a lamplit walnut desk, and a neutral card in an amber
+   * room reads as a cut-out laid over a photograph rather than as an object
+   * inside it. Warmed until the paper sits in the plate's colour temperature.
+   *
+   * Deliberately still a long way short of the lamp itself: this is cream
+   * stock catching warm light, not gold leaf.
+   */
+  const WARM_VOID = new THREE.Color(1.0, 0.955, 0.885);
+  const WARM_DESK = new THREE.Color(1.0, 0.965, 0.912);
 
   /*
    * The light through beats 4–6. There is no fog volume anywhere in this
@@ -736,6 +813,12 @@ export function createCardScene(
   // Beat 1's autonomous rotation — the only autonomous motion in the site.
   let introAmp = 1;
   let introReleasedAt = 0;
+
+  // Spring damped pointer, written from Stage. -1..1 from the centre of the
+  // viewport, plus how much of it applies at the current scroll position.
+  let ptrX = 0;
+  let ptrY = 0;
+  let ptrAmt = 0;
 
   /** Whether card 0's instance matrix is currently identity. */
   let heroIsIdentity = false;
@@ -833,24 +916,61 @@ export function createCardScene(
 
     // Autonomous rotation, easing away once the user has scrolled. A sine is
     // already still at its extremes, which is the ease the brief asks for.
+    let idleY = 0;
     if (introAmp > 0) {
       if (introReleasedAt > 0) {
         introAmp = Math.max(0, 1 - (nowMs - introReleasedAt) / INTRO_RELEASE_MS);
       }
       const eased = introAmp * introAmp * (3 - 2 * introAmp);
-      mesh.rotation.y =
+      idleY =
         INTRO_AMPLITUDE *
         eased *
         Math.sin((nowMs / INTRO_PERIOD_MS) * Math.PI * 2);
-    } else {
-      mesh.rotation.y = 0;
     }
-    u.uCardNormal.value.set(Math.sin(mesh.rotation.y), 0, Math.cos(mesh.rotation.y));
+
+    // Cursor tilt, on top of the idle rather than instead of it, and scaled
+    // by the same amount that retires the parallax. Both are gone by the time
+    // the card is landing.
+    mesh.rotation.y = idleY - ptrX * TILT_Y * ptrAmt;
+    mesh.rotation.x = ptrY * TILT_X * ptrAmt;
+
+    // The plane's normal, for the fresnel and rim terms. This used to assume
+    // rotation on Y only; with a tilt on X as well it is Rz·Ry·Rx applied to
+    // (0,0,1), which for z = 0 is the expression below. Getting this wrong
+    // does not throw, it just puts the edge light on the wrong edge.
+    {
+      const sx = Math.sin(mesh.rotation.x);
+      const cx = Math.cos(mesh.rotation.x);
+      const sy = Math.sin(mesh.rotation.y);
+      const cy = Math.cos(mesh.rotation.y);
+      u.uCardNormal.value.set(sy * cx, -sx, cy * cx);
+    }
 
     const cam = cameraAt(g, cardPos.y);
-    camera.position.set(cam.x, cam.y, cam.z);
+
+    /*
+     * Cursor parallax on the camera. An offset added to the finished path,
+     * never a change to it: at ptrX = ptrY = 0, or at ptrAmt = 0, every one
+     * of these terms is exactly zero and the dolly is bit-identical to what
+     * it was before this existed. That is what keeps the measured pivot
+     * handoff from drifting.
+     *
+     * The offset is applied to the position and to the look-at target
+     * equally, so the camera translates rather than rotates. A rotation here
+     * would change the framing that the pivot's fit calculations depend on.
+     *
+     * Negative, because moving the camera left makes the card appear to move
+     * right, and the card is meant to drift with the cursor.
+     */
+    const dist = Math.max(cam.z - cardPos.z, 0.05);
+    const worldPerPx = (2 * halfFovTan * dist) / Math.max(viewportH, 1);
+    const off = CAM_PARALLAX_PX * worldPerPx * ptrAmt;
+    const ox = -ptrX * off;
+    const oy = ptrY * off;
+
+    camera.position.set(cam.x + ox, cam.y + oy, cam.z);
     // Straight-on dolly: no rotation, so the framing maths above holds.
-    camera.lookAt(cam.x, cam.y, cardPos.z);
+    camera.lookAt(cam.x + ox, cam.y + oy, cardPos.z);
 
     // Glass rises through the void and is gone by the time the card is paper
     // on a desk. That contrast is the point of the term existing at all.
@@ -984,6 +1104,13 @@ export function createCardScene(
       if (introReleasedAt === 0 && introAmp > 0) {
         introReleasedAt = performance.now();
       }
+    },
+    setPointer(x: number, y: number, amount: number) {
+      if (x === ptrX && y === ptrY && amount === ptrAmt) return;
+      ptrX = x;
+      ptrY = y;
+      ptrAmt = amount;
+      dirty = true;
     },
     setSize(width: number, height: number) {
       renderer.setSize(width, height, false);

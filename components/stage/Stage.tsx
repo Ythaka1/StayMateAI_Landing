@@ -4,13 +4,14 @@ import { useEffect, useRef, useState, type ReactNode, type RefObject } from "rea
 import { MotionConfig } from "framer-motion";
 import { createCardScene, type CardScene } from "./scene";
 import { PANELS, Panel } from "./Panels";
-import { DarknessCopy, DescentCopy, PullbackCopy, ScrollCue } from "./Copy";
+import { HeroCopy, DescentCopy, PullbackCopy, ScrollCue } from "./Copy";
+import { HeroPlate } from "./HeroPlate";
 import { NumberBeat, type NumberBeatHandle } from "./NumberBeat";
 import { Nav } from "@/components/site/Nav";
 import DebugOverlay from "./DebugOverlay";
 import { debugEnabled, stageDebug } from "./debug";
 import {
-  COPY_DARKNESS,
+  COPY_HERO,
   COPY_DESCENT,
   COPY_NUMBER,
   COPY_PULLBACK,
@@ -19,6 +20,8 @@ import {
   NAV_IN,
   PANELS_TRAVEL,
   PANEL_COUNT,
+  PARALLAX_OUT,
+  PLATE_OUT,
   SEGMENTS,
   band,
   canvasAsleep,
@@ -29,6 +32,7 @@ import {
   within,
 } from "./timeline";
 import { getLenis } from "@/lib/lenis";
+import { createPointerSpring } from "@/lib/pointer";
 
 /*
  * The 3D, and only the 3D.
@@ -123,7 +127,11 @@ export default function Stage({
   const descentSegRef = useRef<HTMLDivElement>(null);
   const pivotSegRef = useRef<HTMLDivElement>(null);
   const corridorSegRef = useRef<HTMLDivElement>(null);
-  const darknessRef = useRef<HTMLDivElement>(null);
+  const heroRef = useRef<HTMLDivElement>(null);
+  const cueRef = useRef<HTMLDivElement>(null);
+  const plateLayerRef = useRef<HTMLDivElement>(null);
+  const plateImgRef = useRef<HTMLDivElement>(null);
+  const lampRef = useRef<HTMLDivElement>(null);
   const descentRef = useRef<HTMLDivElement>(null);
   const layerRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -138,7 +146,11 @@ export default function Stage({
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    const darkness = darknessRef.current;
+    const hero = heroRef.current;
+    const cue = cueRef.current;
+    const plateLayer = plateLayerRef.current;
+    const plateImg = plateImgRef.current;
+    const lamp = lampRef.current;
     const descent = descentRef.current;
     const layer = layerRef.current;
     const track = trackRef.current;
@@ -151,7 +163,8 @@ export default function Stage({
       corridorSegRef.current,
     ];
     if (
-      !canvas || !darkness || !descent || !layer || !track ||
+      !canvas || !hero || !cue || !plateLayer || !plateImg || !lamp ||
+      !descent || !layer || !track ||
       !pullback || !numberEl || !nav || spacers.some((s) => !s)
     ) {
       return;
@@ -219,6 +232,10 @@ export default function Stage({
     let lastTrack = -1;
     let lastPointer = "";
     let lastVisible = "";
+    let lastPlateVis = "";
+    // How much of the cursor parallax applies at the current scroll position.
+    // Written by apply(), read by the pointer loop below.
+    let parallaxAmt = 0;
     // The nav only ever comes on. Nothing writes it while a flat section
     // fills the viewport, so without the latch it would blink off between
     // segments.
@@ -264,6 +281,11 @@ export default function Stage({
           lastVisible = "hidden";
           canvas.style.visibility = "hidden";
         }
+        if (lastPlateVis !== "hidden") {
+          lastPlateVis = "hidden";
+          plateLayer.style.visibility = "hidden";
+        }
+        parallaxAmt = 0;
         scene.stop();
         raiseNav(window.scrollY > window.innerHeight ? 1 : 0);
         lastApplied = "";
@@ -296,8 +318,28 @@ export default function Stage({
       scene.setProgress(g);
 
       // The descent segment's copy.
-      setLayerOpacity(darkness, band(g, COPY_DARKNESS));
+      setLayerOpacity(hero, band(g, COPY_HERO));
       setLayerOpacity(descent, band(g, COPY_DESCENT));
+
+      /*
+       * The photographic plate. Only the descent segment ever shows it: the
+       * pivot is inside the card's own surface and the corridor is a room
+       * full of cards, and a desk showing through either would be a second
+       * room behind the first.
+       */
+      const plate =
+        segment.id === "descent" ? 1 - within(g, PLATE_OUT) : 0;
+      setLayerOpacity(plateLayer, plate);
+      // visibility, not just opacity: an opacity-0 fixed full-viewport layer
+      // is still composited on every frame of the rest of the page.
+      const plateVis = plate > 0.002 ? "visible" : "hidden";
+      if (plateVis !== lastPlateVis) {
+        lastPlateVis = plateVis;
+        plateLayer.style.visibility = plateVis;
+      }
+
+      // How much of the pointer applies here. Retired as the descent starts.
+      parallaxAmt = 1 - within(g, PARALLAX_OUT);
 
       // The corridor segment's copy.
       setLayerOpacity(pullback, band(g, COPY_PULLBACK));
@@ -348,9 +390,79 @@ export default function Stage({
       else scene.start();
     };
 
+    /*
+     * ── Cursor parallax ─────────────────────────────────────────────────
+     *
+     * One spring, three layers, one rAF. Each layer taking its own listener
+     * would be three springs settling at three slightly different times,
+     * which is the wobble that makes layered parallax look cheap.
+     *
+     * The loop only runs while the spring is still moving AND the hero is
+     * still on screen, so it is not a permanent rAF: it exits the moment the
+     * cursor stops, and restarts on the next pointermove.
+     *
+     * Amplitudes, per the direction each layer has to move:
+     *   plate    8px, against the cursor  (furthest away, so it lags most)
+     *   lamp     3px, with the cursor
+     *   camera   4px worth, with the cursor (handled inside the scene)
+     *
+     * createPointerSpring returns null on coarse pointers and under reduced
+     * motion, and then none of this exists at all.
+     */
+    const spring = createPointerSpring();
+    let parallaxRaf = 0;
+    let lastPtrMs = 0;
+    let lastPlateT = "";
+    let lastLampT = "";
+
+    const writeParallax = () => {
+      const a = parallaxAmt;
+      const px = spring ? spring.x : 0;
+      const py = spring ? spring.y : 0;
+
+      const pT = `translate3d(${(-px * 8 * a).toFixed(2)}px, ${(-py * 8 * a).toFixed(2)}px, 0)`;
+      if (pT !== lastPlateT) {
+        lastPlateT = pT;
+        plateImg.style.transform = pT;
+      }
+      const lT = `translate3d(${(px * 3 * a).toFixed(2)}px, ${(py * 3 * a).toFixed(2)}px, 0)`;
+      if (lT !== lastLampT) {
+        lastLampT = lT;
+        lamp.style.transform = lT;
+      }
+      scene.setPointer(px, py, a);
+    };
+
+    const pump = (nowMs: number) => {
+      const dt = lastPtrMs ? (nowMs - lastPtrMs) / 1000 : 1 / 60;
+      lastPtrMs = nowMs;
+      spring!.step(dt);
+      writeParallax();
+      // Keep going while the spring is settling or while the layers still
+      // have a non-zero offset to unwind.
+      if (spring!.settling || parallaxAmt > 0) {
+        parallaxRaf = requestAnimationFrame(pump);
+      } else {
+        parallaxRaf = 0;
+        lastPtrMs = 0;
+      }
+    };
+
+    const kick = () => {
+      if (!spring || parallaxRaf) return;
+      lastPtrMs = 0;
+      parallaxRaf = requestAnimationFrame(pump);
+    };
+    if (spring) window.addEventListener("pointermove", kick, { passive: true });
+
     // The autonomous rotation in beat 1 ends on the user's first input and
-    // never restarts — from then on scroll owns the camera entirely.
-    const onFirstInput = () => scene.releaseIntro();
+    // never restarts — from then on scroll owns the camera entirely. The
+    // scroll cue goes at the same moment, and for the same reason: it has
+    // been answered.
+    const onFirstInput = () => {
+      scene.releaseIntro();
+      cue.dataset.gone = "true";
+    };
 
     // Passive listeners only. Lenis scrolls the document, so native scroll
     // events fire at frame rate during smooth scrolling.
@@ -388,6 +500,11 @@ export default function Stage({
       window.removeEventListener("wheel", onFirstInput);
       window.removeEventListener("touchstart", onFirstInput);
       window.removeEventListener("keydown", onFirstInput);
+      if (spring) {
+        window.removeEventListener("pointermove", kick);
+        if (parallaxRaf) cancelAnimationFrame(parallaxRaf);
+        spring.destroy();
+      }
       scene.dispose();
     };
   }, []);
@@ -437,6 +554,17 @@ export default function Stage({
       <Nav ref={navRef} />
 
       {/*
+        The hero's room. Fixed, and underneath the canvas: since pass 06 the
+        canvas is transparent, so the card stands in this photograph rather
+        than in front of a black rectangle covering it.
+      */}
+      <HeroPlate
+        ref={plateLayerRef}
+        plateRef={plateImgRef}
+        gradientRef={lampRef}
+      />
+
+      {/*
         The one WebGL context on the site. Fixed rather than sticky because it
         has to serve three separate segments; the opaque flat sections scroll
         over it and the segments are the gaps it shows through. Its dimensions
@@ -446,14 +574,14 @@ export default function Stage({
       <canvas
         ref={canvasRef}
         aria-hidden="true"
-        className="pointer-events-none fixed inset-0 z-0 block h-full w-full motion-reduce:hidden"
+        className="pointer-events-none fixed inset-0 z-[1] block h-full w-full motion-reduce:hidden"
       />
 
       {/* Everything that scrolls, stacked over the canvas. */}
       <div className="relative z-10">
         <Segment innerRef={descentSegRef} index={0} label="descent">
-          <DarknessCopy ref={darknessRef} />
-          <ScrollCue />
+          <HeroCopy ref={heroRef} />
+          <ScrollCue ref={cueRef} />
           <DescentCopy ref={descentRef} />
         </Segment>
 
