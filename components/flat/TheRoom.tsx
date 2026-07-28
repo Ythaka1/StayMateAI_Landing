@@ -45,14 +45,25 @@ import { getLenis } from "@/lib/lenis";
  */
 
 /**
- * Spacer height in svh. Travel is this minus the one sticky viewport, so 180
- * gives 80svh of vertical scroll for roughly 300px of lateral drift at a
- * desktop width — about 2.5:1. Deliberately slower than the scroll: the strip
- * should read as drifting past, not as being dragged. Shorter than the 200
- * this started at, because a pinned section that outstays the three things it
- * has to show is the exact failure this whole pass exists to fix.
+ * Spacer height in svh. Travel is this minus the one sticky viewport, so 280
+ * gives 180svh of vertical scroll. Against roughly 1300px of lateral travel
+ * at a desktop width that is close to 1:1, which is what a strip wants: the
+ * panels move at the speed of the hand moving them.
+ *
+ * Up from 180. The panels are now full 4:3 frames rather than portrait crops,
+ * so the track is more than twice as wide and needs the room to cross.
  */
-const SECTION_VH = 180;
+const SECTION_VH = 280;
+
+/**
+ * The strip holds still for the first and last 8% of the section.
+ *
+ * Without this the third panel is still arriving as the section releases and
+ * the first is still leaving as it is pinned, so neither of them is ever
+ * simply looked at. A beat of rest at each end is what turns three things
+ * passing through the frame into three things that arrive, are read, and go.
+ */
+const REST = 0.08;
 
 const PANELS = [
   {
@@ -159,7 +170,10 @@ export function TheRoom() {
       // would be a style recalc for something nobody can see.
       if (rect.bottom < 0 || rect.top > window.innerHeight) return;
 
-      const p = span > 0 ? clamp01(-rect.top / span) : 0;
+      const raw = span > 0 ? clamp01(-rect.top / span) : 0;
+      // The rest at each end, applied here rather than in the geometry, so
+      // progressForPanel and the transform stay driven by the same number.
+      const p = clamp01((raw - REST) / (1 - REST * 2));
       const { travel } = geo.current;
 
       const x = Math.round(-travel * p * 100) / 100;
@@ -218,7 +232,9 @@ export function TheRoom() {
     const span = section.offsetHeight - window.innerHeight;
     if (span <= 0) return;
     const top = section.getBoundingClientRect().top + window.scrollY;
-    const target = top + span * progressForPanel(i);
+    // Back through the rest window, so a focused panel lands where the scroll
+    // handler agrees it should be rather than REST off it.
+    const target = top + span * (REST + progressForPanel(i) * (1 - REST * 2));
     if (Math.abs(window.scrollY - target) < 8) return;
 
     const goTo = () => {
@@ -299,6 +315,10 @@ export function TheRoom() {
                   </div>
                 </div>
               ))}
+              <span
+                aria-hidden="true"
+                className="w-[4.5rem] shrink-0 motion-reduce:hidden"
+              />
             </div>
           </div>
 
@@ -320,6 +340,26 @@ export function TheRoom() {
               // pixels wide, and the section triples in height for no gain.
               className="flex shrink-0 gap-6 will-change-transform sm:gap-8 motion-reduce:mx-auto motion-reduce:w-full motion-reduce:max-w-[44rem] motion-reduce:flex-col motion-reduce:gap-20 motion-reduce:transform-none motion-reduce:will-change-auto"
             >
+              {/*
+                A spacer at each end, and the travel is measured from the
+                track including them.
+
+                Flush against the strip's edges, the first panel starts well
+                left of centre and the last one ends well right of it, so
+                neither is ever squarely looked at. These pull both ends in
+                until the offset is under a tenth of a panel width, which
+                reads as centred, while leaving enough overhang that the strip
+                still runs off both edges rather than terminating.
+
+                Real elements rather than padding on the track: right padding
+                on an overflowing flex row is not reliably counted in
+                scrollWidth, and scrollWidth is what the travel is measured
+                from.
+              */}
+              <span
+                aria-hidden="true"
+                className="w-[4.5rem] shrink-0 motion-reduce:hidden"
+              />
               {PANELS.map((panel, i) => (
                 <div
                   key={panel.src}
@@ -329,13 +369,7 @@ export function TheRoom() {
                   aria-label={panel.question}
                   onFocus={() => pullTo(i)}
                   className={[
-                    "shrink-0 outline-none",
-                    // Against the 78svh height below this is roughly 1:1.9 —
-                    // properly portrait. Wider and the panels read as stills
-                    // in a gallery; much narrower and they read as phone
-                    // screenshots, and there is not enough total track width
-                    // left for the strip to have anywhere to travel.
-                    "w-[clamp(16rem,26vw,25rem)] motion-reduce:w-full",
+                    "shrink-0 outline-none motion-reduce:w-full",
                     "transition-opacity duration-500",
                     // The panel being read is fully lit; the ones arriving
                     // and leaving sit back. -1 is the reduced-motion state,
@@ -353,7 +387,16 @@ export function TheRoom() {
                     src={panel.src}
                     poster={panel.poster}
                     alt={panel.alt}
-                    className="h-[min(78svh,46rem)] w-full rounded-sm motion-reduce:aspect-[4/3] motion-reduce:h-auto"
+                    // The whole frame, at the footage's own 4:3. The portrait
+                    // crop this replaced threw away a third of every shot and
+                    // the spa clip, which is the darkest and the least
+                    // legible, lost the only part of it that reads.
+                    //
+                    // Height first, width from the ratio: one panel then sits
+                    // comfortably inside the viewport at any height, and the
+                    // track's width follows from that rather than being
+                    // guessed in vw.
+                    className="aspect-[4/3] h-[min(58svh,32rem)] w-auto rounded-sm motion-reduce:h-auto motion-reduce:w-full"
                   />
 
                   {/* The accessible caption, and the visible one once the
@@ -375,6 +418,10 @@ export function TheRoom() {
                   </div>
                 </div>
               ))}
+              <span
+                aria-hidden="true"
+                className="w-[4.5rem] shrink-0 motion-reduce:hidden"
+              />
             </div>
           </div>
         </div>
