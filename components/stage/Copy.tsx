@@ -1,6 +1,7 @@
 "use client";
 
 import { forwardRef } from "react";
+import { BACK_FACE_LINE } from "./textures";
 
 /*
  * The DOM copy for beats 1 and 2. These sit over the canvas and their opacity
@@ -143,6 +144,24 @@ export const DescentCopy = forwardRef<HTMLDivElement>(function DescentCopy(
           picking one, and naming a single language quietly undersells what
           the thing does.
         */}
+
+        {/*
+          The card's back, for anyone who will never see it turn.
+
+          Under reduced motion there is no WebGL at all, so the flip and the
+          line that fades onto the settled card do not exist. The line still
+          has to: it is the concierge's first reply and the point of the whole
+          beat. Set here as a quiet static block instead, in the display face,
+          the way it is set on the card itself.
+        */}
+        <p
+          className={[
+            "mt-10 hidden font-display text-[1.15rem] leading-snug text-paper/80",
+            "motion-reduce:block",
+          ].join(" ")}
+        >
+          {BACK_FACE_LINE}
+        </p>
       </div>
     </div>
   );

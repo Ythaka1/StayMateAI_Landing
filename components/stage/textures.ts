@@ -335,6 +335,69 @@ function displayFamily(): string {
 }
 
 /**
+ * The card's back: blank stock, and one line.
+ *
+ * The front is the printed side a guest scans. The back is what the card
+ * shows once it has turned over and landed, and it carries the concierge's
+ * first reply, set as though the paper itself were answering. One sentence.
+ * Anything longer stops being a reply and becomes a leaflet.
+ *
+ * Set centred and slightly below the middle, which keeps it well clear of the
+ * upper-left band the pivot's camera terminates in. It is faded in by
+ * uBackInk as the card settles, and out again by uFlat before the handoff, so
+ * the terminal frame is still blank stock and the measured seam is unchanged.
+ *
+ * Alpha only, like the print layer: the shader supplies the ink colour, so
+ * this is a coverage mask rather than a picture.
+ */
+export function makeBackTexture(onRedraw?: () => void): THREE.Texture {
+  const W = 768;
+  const H = 1024;
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d")!;
+
+  const draw = () => {
+    ctx.clearRect(0, 0, W, H);
+    const family = displayFamily();
+    ctx.fillStyle = "#15171b";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = `40px ${family}`;
+    ctx.fillText("Good evening.", W / 2, H * 0.5 - 30);
+    ctx.fillText("What can I get you?", W / 2, H * 0.5 + 30);
+  };
+
+  draw();
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = true;
+  tex.needsUpdate = true;
+
+  if (typeof document !== "undefined" && document.fonts) {
+    document.fonts
+      .load(`40px ${displayFamily()}`)
+      .then(() => document.fonts.ready)
+      .then(() => {
+        draw();
+        tex.needsUpdate = true;
+        onRedraw?.();
+      })
+      .catch(() => {
+        /* keep the fallback rendering */
+      });
+  }
+
+  return tex;
+}
+
+/** The line on the back face, for the reduced-motion path's DOM copy. */
+export const BACK_FACE_LINE = "Good evening. What can I get you?";
+
+/**
  * The printed layer of the tent card: QR-like block upper-centre, a brass
  * rule, the wordmark, one muted line. Canvas aspect matches the card
  * (3:4) so card-space squares stay square.

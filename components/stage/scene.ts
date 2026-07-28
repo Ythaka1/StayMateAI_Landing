@@ -3,11 +3,14 @@ import {
   ROOM_ATLAS_COLS,
   ROOM_ATLAS_ROWS,
   loadStockTexture,
+  makeBackTexture,
   makeGrainTexture,
   makePrintTexture,
   makeRoomsTexture,
 } from "./textures";
 import {
+  BACK_INK,
+  FLIP,
   RETREAT_IN,
   RETREAT_OUT,
   CONVERGE,
@@ -157,6 +160,10 @@ const TILT_X = (2 * Math.PI) / 180;
  */
 const CAM_PARALLAX_PX = 4;
 
+/** The flip spring. Underdamped, but only just: a few degrees of overshoot. */
+const FLIP_K = 58;
+const FLIP_D = 11;
+
 const vertexShader = /* glsl */ `
   varying vec2 vUv;
   varying vec3 vWorld;
@@ -191,6 +198,11 @@ const fragmentShader = /* glsl */ `
   uniform sampler2D uStock;
   uniform float uStockAmt;    // 0 until (or unless) the photograph loads
   uniform float uStockRepeat;
+  // The back of the card: blank stock carrying one line. Alpha coverage only;
+  // the ink colour comes from uInk.
+  uniform sampler2D uBack;
+  uniform float uBackInk;     // the line fading on as the card settles
+  uniform vec3 uInk;
   uniform float uGrainRepeat;
   uniform float uFlat;     // 0 = lit card, 1 = flat exact-hex paper field
   uniform float uGlass;    // fresnel rim + deboss chroma. 0 below 768px.
@@ -219,7 +231,6 @@ const fragmentShader = /* glsl */ `
     uniform sampler2D uRooms;
     uniform vec4 uRoomRect;   // where on the card: u0, v0, width, height
     uniform vec2 uRoomCell;   // one cell's size in atlas UV
-    uniform vec3 uInk;
     varying vec2 vRoomCell;
   #endif
 
@@ -298,14 +309,28 @@ const fragmentShader = /* glsl */ `
     // surface is being examined, so it is the one place the photograph earns
     // its sample. uStockAmt is 0, and the sample therefore free of visual
     // consequence, if the photograph never loads.
-    float grain = texture2D(uGrain, cuv * uGrainRepeat).r - 0.5;
-    float stock = (texture2D(uStock, cuv * uStockRepeat).r - 0.5) * uStockAmt;
+    /*
+     * Which face are we looking at.
+     *
+     * The card has two sides since pass 06: the printed front a guest scans,
+     * and blank stock behind it. It turns over as it falls, so the material
+     * is DoubleSide and this is the only thing that tells the two apart.
+     *
+     * The back's UV is mirrored in x. Without that, everything on the back
+     * would be reversed, which is right for a print bleeding through a sheet
+     * and wrong for anything actually set on it.
+     */
+    float facing = gl_FrontFacing ? 1.0 : 0.0;
+    vec2 fuv = gl_FrontFacing ? cuv : vec2(1.0 - cuv.x, cuv.y);
+
+    float grain = texture2D(uGrain, fuv * uGrainRepeat).r - 0.5;
+    float stock = (texture2D(uStock, fuv * uStockRepeat).r - 0.5) * uStockAmt;
     vec3 tint = uPaper * (1.0 + grain * 0.05 + stock * 0.14);
 
     vec3 col = tint;
     float deboss = 0.0;
     if (uFlat < 1.0) {
-      vec4 pr = texture2D(uPrint, cuv);
+      vec4 pr = texture2D(uPrint, fuv);
       vec3 ink = pr.rgb * (1.0 + grain * 0.10);
     #ifdef CHROMA
       {
@@ -314,15 +339,24 @@ const fragmentShader = /* glsl */ `
         // the split appears only where coverage is changing — an embossed
         // edge — and is invisible across flat stock. Not a glass panel, and
         // not a refraction of a background that does not exist.
-        float aR = texture2D(uPrint, cuv + vec2(uChroma, 0.0)).a;
-        float aL = texture2D(uPrint, cuv - vec2(uChroma, 0.0)).a;
+        float aR = texture2D(uPrint, fuv + vec2(uChroma, 0.0)).a;
+        float aL = texture2D(uPrint, fuv - vec2(uChroma, 0.0)).a;
         deboss = aR - aL;
-        vec3 cover = mix(vec3(pr.a), vec3(aR, pr.a, aL), uGlass);
+        vec3 cover = mix(vec3(pr.a), vec3(aR, pr.a, aL), uGlass) * facing;
         col = mix(tint, ink, cover * (1.0 - uFlat));
       }
     #else
-      col = mix(tint, ink, pr.a * (1.0 - uFlat));
+      col = mix(tint, ink, pr.a * facing * (1.0 - uFlat));
     #endif
+
+      /*
+       * The back carries one line and nothing else. uBackInk fades it on as
+       * the card settles; (1 - uFlat) takes it off again before the handoff,
+       * which is what keeps the pivot's terminal frame blank stock and the
+       * measured seam exactly where it was.
+       */
+      float back = texture2D(uBack, fuv).a * (1.0 - facing) * uBackInk;
+      col = mix(col, uInk * (1.0 + grain * 0.10), back * (1.0 - uFlat));
     }
 
     // The only thing that differs card to card: the room number, taken from
@@ -330,7 +364,7 @@ const fragmentShader = /* glsl */ `
     // only in this variant — beat 3's pivot never compiles it in.
   #ifdef ROOMS
     {
-      vec2 rn = (cuv - uRoomRect.xy) / uRoomRect.zw;
+      vec2 rn = (fuv - uRoomRect.xy) / uRoomRect.zw;
       if (rn.x > 0.0 && rn.x < 1.0 && rn.y > 0.0 && rn.y < 1.0) {
         float a = texture2D(uRooms, vRoomCell + rn * uRoomCell).a;
         col = mix(col, uInk * (1.0 + grain * 0.10), a * (1.0 - uFlat));
@@ -364,8 +398,13 @@ const fragmentShader = /* glsl */ `
     {
       // The band is deliberately narrow: widen it and these stop reading as
       // light catching an edge and start reading as a plastic bevel.
+      // The normal has to follow the face. Once the card turns past 90° the
+      // uniform points away from the camera, and an unflipped dot product
+      // saturates the fresnel to 1 across the whole card, which lights the
+      // entire back edge to edge.
+      vec3 N = gl_FrontFacing ? uCardNormal : -uCardNormal;
       vec3 V = normalize(cameraPosition - vWorld);
-      float fres = pow(1.0 - clamp(dot(uCardNormal, V), 0.0, 1.0), 3.0);
+      float fres = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 3.0);
       float edgeBand = smoothstep(-0.055, -0.004, d);
 
       // Cool rim catching the edge opposite the key. Dies as the card lands.
@@ -495,6 +534,9 @@ export function createCardScene(
   const roomsTex = makeRoomsTexture(() => {
     dirty = true;
   });
+  const backTex = makeBackTexture(() => {
+    dirty = true;
+  });
 
   /*
    * The card stock, off card.png. Loaded asynchronously and switched in when
@@ -519,6 +561,8 @@ export function createCardScene(
       uPrint: { value: print },
       uStock: { value: stockPlaceholder },
       uStockAmt: { value: 0 },
+      uBack: { value: backTex },
+      uBackInk: { value: 0 },
       // Low, because this is the stock's character rather than its tooth —
       // the tooth is uGrainRepeat's job. Mirrored wrapping means the folds
       // this creates are not visible.
@@ -592,8 +636,14 @@ export function createCardScene(
     new THREE.ShaderMaterial({
       vertexShader,
       fragmentShader,
-      // Every fragment that survives the discard is opaque, so no blending.
-      transparent: false,
+      // The card turns over as it falls, so both sides have to rasterise.
+      // Without this the back face is culled and the card simply vanishes
+      // halfway through the flip.
+      side: THREE.DoubleSide,
+      // The canvas composites with the page now, so fragments carry their own
+      // coverage. Premultiplied, which is three's default blend.
+      transparent: true,
+      depthWrite: true,
       defines,
       uniforms,
     });
@@ -820,6 +870,21 @@ export function createCardScene(
   let ptrY = 0;
   let ptrAmt = 0;
 
+  /*
+   * The flip, as a spring chasing a scroll-derived target rather than as a
+   * position read straight off scroll.
+   *
+   * Read straight off scroll, the turn is rigidly welded to the wheel: it
+   * stops the instant you stop and it has no weight at all. As a spring it
+   * lags the scroll on the way over and settles past the landing, which is
+   * what a stiff card actually does when it is dropped. Underdamped on
+   * purpose, but only just: the overshoot is a few degrees.
+   */
+  let flipAngle = 0;
+  let flipVel = 0;
+  let flipMs = 0;
+  let flipSettling = false;
+
   /** Whether card 0's instance matrix is currently identity. */
   let heroIsIdentity = false;
 
@@ -928,11 +993,40 @@ export function createCardScene(
         Math.sin((nowMs / INTRO_PERIOD_MS) * Math.PI * 2);
     }
 
+    /*
+     * The flip. Integrated here rather than in a separate loop because it has
+     * to see the same `g` the rest of the frame does.
+     *
+     * Past the pivot the angle is dropped to zero outright. That sounds like
+     * it should be visible and is not: at PIVOT.end the camera is inside the
+     * card's own surface with uFlat at 1, so the entire frame is one flat
+     * cream colour and there is no detail anywhere in it for a rotation to
+     * show up in. The corridor then opens on that same frame and dollies back
+     * out with the card front-on, which is what beats 4 to 6 need, since the
+     * room numbers are printed on the front.
+     */
+    const flipTarget = Math.PI * easeInOutCubic(within(g, FLIP));
+    {
+      const dt = Math.min(flipMs ? (nowMs - flipMs) / 1000 : 1 / 60, 1 / 30);
+      flipMs = nowMs;
+      flipVel += (FLIP_K * (flipTarget - flipAngle) - FLIP_D * flipVel) * dt;
+      flipAngle += flipVel * dt;
+      flipSettling =
+        Math.abs(flipTarget - flipAngle) > 1e-4 || Math.abs(flipVel) > 1e-4;
+      if (!flipSettling) {
+        flipAngle = flipTarget;
+        flipVel = 0;
+      }
+    }
+    const flip = g <= PIVOT.end ? flipAngle : 0;
+
     // Cursor tilt, on top of the idle rather than instead of it, and scaled
     // by the same amount that retires the parallax. Both are gone by the time
     // the card is landing.
-    mesh.rotation.y = idleY - ptrX * TILT_Y * ptrAmt;
+    mesh.rotation.y = idleY + flip - ptrX * TILT_Y * ptrAmt;
     mesh.rotation.x = ptrY * TILT_X * ptrAmt;
+
+    u.uBackInk.value = easeOutCubic(within(g, BACK_INK));
 
     // The plane's normal, for the fresnel and rim terms. This used to assume
     // rotation on Y only; with a tilt on X as well it is Rz·Ry·Rx applied to
@@ -1088,9 +1182,10 @@ export function createCardScene(
 
   function loop(nowMs: number) {
     raf = requestAnimationFrame(loop);
-    // While the intro rotation is alive the scene is time-driven, so every
-    // frame is dirty. Once it is released we are back to scroll-driven only.
-    if (introAmp > 0) dirty = true;
+    // While the intro rotation is alive, or the flip spring is still on its
+    // way to where scroll has asked it to be, the scene is time-driven and
+    // every frame is dirty. Once both are done we are back to scroll-driven.
+    if (introAmp > 0 || flipSettling) dirty = true;
     if (dirty) render(nowMs);
   }
 
@@ -1197,6 +1292,7 @@ export function createCardScene(
       lean.dispose();
       grain.dispose();
       print.dispose();
+      backTex.dispose();
       stockPlaceholder.dispose();
       stock?.dispose();
       roomsTex.dispose();

@@ -147,6 +147,29 @@ export const LANDING = {
 } as const;
 
 /**
+ * The card turns over as it falls, and lands with its blank back to camera.
+ *
+ * Ends where the fall does, so the turn and the landing are one movement
+ * rather than two. It is a spring target rather than a position: the scroll
+ * says where the card should be pointing and the spring decides how it gets
+ * there, which is what gives the turn weight and lets it settle past the
+ * landing instead of arriving exactly on it.
+ */
+export const FLIP = {
+  start: DESCENT.start,
+  end: DESCENT.start + descentSpan * 0.55,
+} as const;
+
+/**
+ * The line fading onto the back face. It starts as the card comes to rest,
+ * not while it is still turning, because paper does not answer mid air.
+ */
+export const BACK_INK = {
+  start: DESCENT.start + descentSpan * 0.52,
+  end: DESCENT.start + descentSpan * 0.68,
+} as const;
+
+/**
  * The camera holds its wide framing until the copy is on its way out, then
  * converges onto the pivot's opening frame. Held any earlier and the card
  * fills the frame while the copy is still being read, with nowhere dark for
