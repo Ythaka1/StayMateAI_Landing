@@ -38,6 +38,8 @@ export function PhotoField({
   position = "center",
   scrim,
   priority = false,
+  className = "absolute inset-0",
+  sizes = "100vw",
 }: {
   src: string;
   /** The solid underneath. Shows before — or instead of — the photograph. */
@@ -47,13 +49,21 @@ export function PhotoField({
   /** The darkening ramp, as a CSS gradient. */
   scrim?: string;
   priority?: boolean;
+  /**
+   * Where the field sits. Full bleed by default, which is what most of these
+   * are, but a portrait plate cropped into a landscape bleed loses most of its
+   * subject, so section 2 runs one as a panel down one side instead.
+   */
+  className?: string;
+  /** Must match `className`'s actual width, or the optimiser picks wrong. */
+  sizes?: string;
 }) {
   const [failed, setFailed] = useState(false);
 
   return (
     <div
       aria-hidden="true"
-      className="pointer-events-none absolute inset-0 overflow-hidden"
+      className={`pointer-events-none overflow-hidden ${className}`}
       style={{ background: tone }}
     >
       {failed ? null : (
@@ -61,7 +71,7 @@ export function PhotoField({
           src={src}
           alt=""
           fill
-          sizes="100vw"
+          sizes={sizes}
           priority={priority}
           onError={() => setFailed(true)}
           className="object-cover"
