@@ -218,10 +218,20 @@ const fragmentShader = /* glsl */ `
   uniform sampler2D uStock;
   uniform float uStockAmt;    // 0 until (or unless) the photograph loads
   uniform float uStockRepeat;
-  // The back of the card: blank stock carrying one line. Alpha coverage only;
-  // the ink colour comes from uInk.
+  /*
+   * The back of the card, carrying an exchange rather than a line.
+   *
+   * Three channels, baked by makeBackTexture:
+   *   r  the word's place in the queue, 0 first to BACK_LAST last
+   *   g  sharp coverage
+   *   b  blurred coverage
+   *
+   * uBackReveal sweeps 0 to 1 across BACK_INK and the words arrive in order,
+   * each one out of its own blur. One sample, and no texture uploads: the
+   * whole cascade is in the texture rather than repainted per frame.
+   */
   uniform sampler2D uBack;
-  uniform float uBackInk;     // the line fading on as the card settles
+  uniform float uBackReveal;
   uniform vec3 uInk;
   uniform float uGrainRepeat;
   uniform float uFlat;     // 0 = lit card, 1 = flat exact-hex paper field
@@ -370,12 +380,20 @@ const fragmentShader = /* glsl */ `
     #endif
 
       /*
-       * The back carries one line and nothing else. uBackInk fades it on as
-       * the card settles; (1 - uFlat) takes it off again before the handoff,
-       * which is what keeps the pivot's terminal frame blank stock and the
-       * measured seam exactly where it was.
+       * The back's exchange, word by word.
+       *
+       * t is how far this word has arrived: 0 before the sweep reaches its
+       * ordinal, 1 once it is a window past. Below 1 the blurred copy shows
+       * at partial strength, which is the same gesture the DOM cascade makes
+       * and the reason the coverage is stored twice.
+       *
+       * (1 - uFlat) takes the whole thing off again before the handoff, which
+       * is what keeps the pivot's terminal frame blank stock and the measured
+       * seam exactly where it was.
        */
-      float back = texture2D(uBack, fuv).a * (1.0 - facing) * uBackInk;
+      vec3 bk = texture2D(uBack, fuv).rgb;
+      float t = clamp((uBackReveal - bk.r) / 0.18, 0.0, 1.0);
+      float back = mix(bk.b, bk.g, t) * t * (1.0 - facing);
       col = mix(col, uInk * (1.0 + grain * 0.10), back * (1.0 - uFlat));
     }
 
@@ -582,7 +600,7 @@ export function createCardScene(
       uStock: { value: stockPlaceholder },
       uStockAmt: { value: 0 },
       uBack: { value: backTex },
-      uBackInk: { value: 0 },
+      uBackReveal: { value: 0 },
       // Low, because this is the stock's character rather than its tooth —
       // the tooth is uGrainRepeat's job. Mirrored wrapping means the folds
       // this creates are not visible.
@@ -1105,7 +1123,7 @@ export function createCardScene(
     mesh.rotation.y = idleY + flip - ptrX * TILT_Y * ptrAmt;
     mesh.rotation.x = cardPos.tilt + ptrY * TILT_X * ptrAmt;
 
-    u.uBackInk.value = easeOutCubic(within(g, BACK_INK));
+    u.uBackReveal.value = within(g, BACK_INK);
 
     // The plane's normal, for the fresnel and rim terms. This used to assume
     // rotation on Y only; with a tilt on X as well it is Rz·Ry·Rx applied to

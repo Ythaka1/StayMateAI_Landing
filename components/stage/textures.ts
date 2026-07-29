@@ -354,20 +354,194 @@ function displayFamily(): string {
 export function makeBackTexture(onRedraw?: () => void): THREE.Texture {
   const W = 768;
   const H = 1024;
+
+  /** Where the ink sits, in canvas units. */
+  const MEASURE = W - 190;
+  const GUEST_SIZE = 34;
+  const REPLY_SIZE = 40;
+  const BLUR_PX = 7;
+
   const canvas = document.createElement("canvas");
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext("2d")!;
 
+  /** One word, laid out, with the box its blur will occupy. */
+  type Word = {
+    text: string;
+    x: number;
+    y: number;
+    size: number;
+    family: string;
+    muted: boolean;
+    /** Ordinal, pre-scaled so the last word starts at BACK_LAST. */
+    ord: number;
+    box: { x0: number; y0: number; x1: number; y1: number };
+  };
+
+  const layout = (): Word[] => {
+    const display = displayFamily();
+    const words: Word[] = [];
+    const raw: Omit<Word, "ord" | "box">[] = [];
+
+    // Two lines, each wrapped to the measure, stacked around the middle of
+    // the card. The guest is set smaller and lighter than the reply, which is
+    // the only thing distinguishing them: a printed card has no room for
+    // chat bubbles and would look ridiculous wearing them.
+    const blocks = [
+      { text: BACK_GUEST, size: GUEST_SIZE, muted: true },
+      { text: BACK_REPLY, size: REPLY_SIZE, muted: false },
+    ];
+
+    // Measure first so the whole exchange can be centred vertically.
+    const lines: { words: string[]; size: number; muted: boolean }[] = [];
+    for (const b of blocks) {
+      ctx.font = `${b.size}px ${display}`;
+      const spaceW = ctx.measureText(" ").width;
+      let line: string[] = [];
+      let w = 0;
+      for (const word of b.text.split(" ")) {
+        const ww = ctx.measureText(word).width;
+        if (line.length && w + spaceW + ww > MEASURE) {
+          lines.push({ words: line, size: b.size, muted: b.muted });
+          line = [word];
+          w = ww;
+        } else {
+          w += (line.length ? spaceW : 0) + ww;
+          line.push(word);
+        }
+      }
+      if (line.length) lines.push({ words: line, size: b.size, muted: b.muted });
+    }
+
+    const lineH = (size: number) => size * 1.45;
+    const blockGap = 34;
+    let total = 0;
+    lines.forEach((l, i) => {
+      total += lineH(l.size);
+      if (i > 0 && l.muted !== lines[i - 1].muted) total += blockGap;
+    });
+
+    let y = H * 0.48 - total / 2;
+    for (let i = 0; i < lines.length; i++) {
+      const l = lines[i];
+      if (i > 0 && l.muted !== lines[i - 1].muted) y += blockGap;
+      ctx.font = `${l.size}px ${display}`;
+      const spaceW = ctx.measureText(" ").width;
+      let lineW = 0;
+      const widths = l.words.map((wd) => ctx.measureText(wd).width);
+      widths.forEach((wd, k) => (lineW += wd + (k ? spaceW : 0)));
+      let x = (W - lineW) / 2;
+      l.words.forEach((wd, k) => {
+        raw.push({
+          text: wd,
+          x,
+          y: y + l.size * 0.5,
+          size: l.size,
+          family: display,
+          muted: l.muted,
+        });
+        x += widths[k] + spaceW;
+      });
+      y += lineH(l.size);
+    }
+
+    // Ordinals, scaled so the final word begins arriving at BACK_LAST and is
+    // fully in at 1. The shader reveals against a single 0..1 uniform and
+    // does not know how many words there are.
+    const n = Math.max(raw.length - 1, 1);
+    raw.forEach((r, i) => {
+      ctx.font = `${r.size}px ${r.family}`;
+      const w = ctx.measureText(r.text).width;
+      words.push({
+        ...r,
+        ord: (i / n) * BACK_LAST,
+        box: {
+          x0: r.x - BLUR_PX * 2,
+          y0: r.y - r.size * 0.9 - BLUR_PX * 2,
+          x1: r.x + w + BLUR_PX * 2,
+          y1: r.y + r.size * 0.5 + BLUR_PX * 2,
+        },
+      });
+    });
+    return words;
+  };
+
+  /*
+   * ── How the cascade is baked in ──────────────────────────────────────────
+   *
+   * The DOM cascade blurs each word and fades it up on a delay. On the card
+   * the same thing has to happen inside a fragment shader driven by scroll,
+   * and it must not cost a texture upload per frame or a second sample.
+   *
+   * So the whole cascade is baked into one RGBA texture:
+   *
+   *   R  the word's ordinal, 0 at the first word and BACK_LAST at the last,
+   *      written across an expanded box around each word so the value is
+   *      still correct out where that word's blur reaches
+   *   G  sharp coverage
+   *   B  blurred coverage
+   *   A  1, so the canvas is opaque and nothing gets premultiplied on upload
+   *
+   * The shader then reads one texel and interpolates: a word not yet reached
+   * is absent, a word arriving is the blurred copy at partial strength, and a
+   * word that has arrived is the sharp copy. One sample, no uploads, and the
+   * same gesture as the DOM.
+   *
+   * The ordinal is written from the layout boxes rather than by blurring a
+   * colour map, which would average the ordinals of neighbouring words
+   * wherever their blurs overlap and put the wrong word in the wrong place in
+   * the queue.
+   */
   const draw = () => {
-    ctx.clearRect(0, 0, W, H);
-    const family = displayFamily();
-    ctx.fillStyle = "#15171b";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.font = `40px ${family}`;
-    ctx.fillText("Good evening.", W / 2, H * 0.5 - 30);
-    ctx.fillText("What can I get you?", W / 2, H * 0.5 + 30);
+    const words = layout();
+
+    const sharp = document.createElement("canvas");
+    sharp.width = W;
+    sharp.height = H;
+    const sctx = sharp.getContext("2d")!;
+    sctx.textAlign = "left";
+    sctx.textBaseline = "middle";
+    for (const wd of words) {
+      sctx.fillStyle = "#fff";
+      sctx.globalAlpha = wd.muted ? 0.62 : 1;
+      sctx.font = `${wd.size}px ${wd.family}`;
+      sctx.fillText(wd.text, wd.x, wd.y);
+    }
+    sctx.globalAlpha = 1;
+
+    const blurred = document.createElement("canvas");
+    blurred.width = W;
+    blurred.height = H;
+    const bctx = blurred.getContext("2d")!;
+    bctx.filter = `blur(${BLUR_PX}px)`;
+    bctx.drawImage(sharp, 0, 0);
+
+    const sd = sctx.getImageData(0, 0, W, H).data;
+    const bd = bctx.getImageData(0, 0, W, H).data;
+
+    const out = ctx.createImageData(W, H);
+    // Ordinal map, from the boxes. Default 1.0 so any stray pixel outside
+    // every box arrives last rather than first.
+    const ordMap = new Uint8ClampedArray(W * H).fill(255);
+    for (const wd of words) {
+      const v = Math.round(wd.ord * 255);
+      const x0 = Math.max(0, Math.floor(wd.box.x0));
+      const x1 = Math.min(W, Math.ceil(wd.box.x1));
+      const y0 = Math.max(0, Math.floor(wd.box.y0));
+      const y1 = Math.min(H, Math.ceil(wd.box.y1));
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) ordMap[y * W + x] = v;
+      }
+    }
+
+    for (let i = 0, px = 0; i < sd.length; i += 4, px++) {
+      out.data[i] = ordMap[px];
+      out.data[i + 1] = sd[i + 3];
+      out.data[i + 2] = bd[i + 3];
+      out.data[i + 3] = 255;
+    }
+    ctx.putImageData(out, 0, 0);
   };
 
   draw();
@@ -380,7 +554,7 @@ export function makeBackTexture(onRedraw?: () => void): THREE.Texture {
 
   if (typeof document !== "undefined" && document.fonts) {
     document.fonts
-      .load(`40px ${displayFamily()}`)
+      .load(`${REPLY_SIZE}px ${displayFamily()}`)
       .then(() => document.fonts.ready)
       .then(() => {
         draw();
@@ -395,8 +569,28 @@ export function makeBackTexture(onRedraw?: () => void): THREE.Texture {
   return tex;
 }
 
-/** The line on the back face, for the reduced-motion path's DOM copy. */
-export const BACK_FACE_LINE = "Good evening. What can I get you?";
+/**
+ * The exchange on the back of the card.
+ *
+ * The front is a printed object. The back is that same printed object holding
+ * a live conversation, which is the entire product in one image and the
+ * reason the card turns over at all.
+ *
+ * Deliberately generic: no currency, no place names, nothing that ties it to
+ * one market. Towels are towels everywhere.
+ */
+export const BACK_GUEST = "Can I get extra towels?";
+export const BACK_REPLY = "Of course. On their way up.";
+
+/**
+ * Where the last word's arrival begins, on the 0..1 reveal. The shader gives
+ * every word the same window past its ordinal, so the tail needs somewhere to
+ * run: at 1.0 the final word would still be arriving when the reveal ends.
+ */
+export const BACK_LAST = 0.82;
+
+/** The exchange, as plain text, for the reduced-motion path's DOM copy. */
+export const BACK_FACE_LINES = [BACK_GUEST, BACK_REPLY] as const;
 
 /**
  * The neutral property the card carries by default.

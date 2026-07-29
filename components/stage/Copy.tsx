@@ -1,7 +1,7 @@
 "use client";
 
 import { forwardRef } from "react";
-import { BACK_FACE_LINE } from "./textures";
+import { BACK_FACE_LINES } from "./textures";
 
 /*
  * The DOM copy for beats 1 and 2. These sit over the canvas and their opacity
@@ -154,14 +154,14 @@ export const DescentCopy = forwardRef<HTMLDivElement>(function DescentCopy(
           beat. Set here as a quiet static block instead, in the display face,
           the way it is set on the card itself.
         */}
-        <p
-          className={[
-            "mt-10 hidden font-display text-[1.15rem] leading-snug text-paper/80",
-            "motion-reduce:block",
-          ].join(" ")}
-        >
-          {BACK_FACE_LINE}
-        </p>
+        <div className="mt-10 hidden motion-reduce:block">
+          <p className="font-display text-[1rem] leading-snug text-paper/50">
+            {BACK_FACE_LINES[0]}
+          </p>
+          <p className="mt-2 font-display text-[1.15rem] leading-snug text-paper/85">
+            {BACK_FACE_LINES[1]}
+          </p>
+        </div>
       </div>
     </div>
   );
