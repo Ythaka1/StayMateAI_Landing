@@ -11,6 +11,7 @@ import {
 import {
   BACK_INK,
   FLIP,
+  RISE,
   RETREAT_IN,
   RETREAT_OUT,
   CONVERGE,
@@ -108,9 +109,10 @@ const CAM_TILT = -0.3; // camera sits low, so the card rides high in frame
 /** How much of the card's fall the camera follows. Below 1, so it drifts. */
 const CAM_FOLLOW = 0.62;
 
-/** Where the card floats before the descent, relative to its landed rest. */
-const CARD_FLOAT_Y = 1.6;
-const CARD_FLOAT_Z = -0.3;
+/*
+ * CARD_FLOAT_Y / CARD_FLOAT_Z are gone. The card does not float before the
+ * descent any more; it lies on the desk and gets up. See cardAt().
+ */
 
 /**
  * How many cards exist. One InstancedMesh, one draw call, regardless — the
@@ -163,6 +165,24 @@ const CAM_PARALLAX_PX = 4;
 /** The flip spring. Underdamped, but only just: a few degrees of overshoot. */
 const FLIP_K = 58;
 const FLIP_D = 11;
+
+/** The rise spring. Stiffer and better damped than the flip: this one has to
+ *  arrive on its edge and stay there, not rock on it. */
+const RISE_K = 96;
+const RISE_D = 17;
+
+/**
+ * Where the camera stands while the card is flat, in card units.
+ *
+ * The flat card's centre is at (0, -CARD_H/2, -CARD_H/2), so this looks down
+ * on it from about forty degrees at a little over six units: steep enough to
+ * keep the QR square enough to read, shallow enough that it is still a card
+ * on a desk rather than a scan of one. The camera travels from here onto its
+ * own path as the card comes up, and both terms are scaled by how flat the
+ * card still is, so at standing they contribute exactly nothing.
+ */
+const FLAT_CAM_Y = 2.8;
+const FLAT_CAM_Z = 3.2;
 
 const vertexShader = /* glsl */ `
   varying vec2 vUv;
@@ -775,34 +795,33 @@ export function createCardScene(
     mesh.instanceMatrix.needsUpdate = true;
   }
 
-  // The key light travels with the beat: steeper and more overhead while the
-  // card is in the void, dropping to a lower, more raking angle as it lands.
-  // It ends at exactly the position beat 3 was tuned against.
-  //
-  // The void position is expressed as an offset from where the card actually
-  // floats, not in world coordinates. The falloff shoulder is tight enough
-  // that half a unit of extra distance takes the stock from cream to grey, so
-  // a light placed absolutely ends up much further from a card that is 1.6
-  // units up in the air, and the card reads as metal again.
-  const KEY_VOID = new THREE.Vector3(
-    -1.85,
-    CARD_FLOAT_Y + 2.0,
-    CARD_FLOAT_Z + 1.35
-  );
+  /*
+   * The key light travels with the card as it comes up.
+   *
+   * There is no void any more, so there is no void light. What there is
+   * instead is a card lying face up on a desk, which wants the lamp more or
+   * less over it, becoming a card standing on that desk, which wants the same
+   * lamp raking across it from the side. Same fixture, different relationship
+   * to the object, which is exactly what happens when something on a desk is
+   * stood up under a lamp that has not moved.
+   *
+   * KEY_FLAT is placed relative to where the flat card actually is, not in
+   * absolute world coordinates. The falloff shoulder is tight enough that
+   * half a unit of extra distance takes the stock from cream to grey, so a
+   * light positioned for the standing card leaves the flat one, which sits a
+   * full card-height lower and further back, reading as metal.
+   *
+   * KEY_DESK is untouched, and it is what the lerp resolves to the instant
+   * the card is standing, so beat 3 is lit exactly as it was tuned.
+   */
+  const KEY_FLAT = new THREE.Vector3(-1.9, 0.55, -0.35);
   const KEY_DESK = new THREE.Vector3(-2.1, 1.5, 1.5);
   /*
-   * The key's colour, in the void and on the desk.
-   *
-   * WARM_VOID used to be all but neutral, which was right when the card hung
-   * in black and there was nothing to compare it to. Since pass 06 it stands
-   * in a photograph of a lamplit walnut desk, and a neutral card in an amber
-   * room reads as a cut-out laid over a photograph rather than as an object
-   * inside it. Warmed until the paper sits in the plate's colour temperature.
-   *
-   * Deliberately still a long way short of the lamp itself: this is cream
-   * stock catching warm light, not gold leaf.
+   * The key's colour. One value now: the card is on a lamplit walnut desk for
+   * the whole of its life on screen, and it was warmed in pass 06 to sit in
+   * that plate's colour temperature. Deliberately still a long way short of
+   * the lamp itself: this is cream stock catching warm light, not gold leaf.
    */
-  const WARM_VOID = new THREE.Color(1.0, 0.955, 0.885);
   const WARM_DESK = new THREE.Color(1.0, 0.965, 0.912);
 
   /*
@@ -885,6 +904,13 @@ export function createCardScene(
   let flipMs = 0;
   let flipSettling = false;
 
+  /** The rise, on its own spring. Stiffer than the flip: a card coming up
+   *  off a desk is shorter and heavier than one turning over in the air. */
+  let riseT = 0;
+  let riseVel = 0;
+  let riseMs = 0;
+  let riseSettling = false;
+
   /** Whether card 0's instance matrix is currently identity. */
   let heroIsIdentity = false;
 
@@ -923,12 +949,39 @@ export function createCardScene(
   }
 
   /** Where the card sits, in world units, at global progress g. */
-  function cardAt(g: number) {
-    const drop = easeOutCubic(within(g, LANDING));
+  /**
+   * Where the card is, given how far up it has come.
+   *
+   * It hinges on its bottom edge rather than spinning about its own centre. A
+   * card rotating about its middle rises through the desk and out the other
+   * side, which reads as a hologram; hinging is what a stiff card actually
+   * does when it is stood up, and it is the difference between an object on a
+   * surface and an object floating near one.
+   *
+   * The hinge is the standing card's bottom edge, at (0, -CARD_H/2, 0), and
+   * the centre swings around it on a quarter circle of radius CARD_H/2:
+   *
+   *   theta = 0     flat, the card lying away from camera along -z
+   *   theta = PI/2  standing, centre back at the origin
+   *
+   * At theta = PI/2 every value below is exactly 0, 0 and 0, which is the
+   * rest state the whole rest of the timeline was built against. That is the
+   * property the pivot handoff depends on, and it holds by construction
+   * rather than by tuning.
+   */
+  function cardAt(riseT: number) {
+    const theta = (riseT * Math.PI) / 2;
+    const r = CARD_H / 2;
     return {
-      y: CARD_FLOAT_Y * (1 - drop),
-      z: CARD_FLOAT_Z * (1 - drop),
-      drop,
+      y: -r + r * Math.sin(theta),
+      z: -r * Math.cos(theta),
+      /** Rotation on X: -PI/2 lying face up, 0 standing. */
+      tilt: theta - Math.PI / 2,
+      /**
+       * On the desk, always. There is no void any more, so the contact
+       * shadow, the bounce and the warm key are alive from the first frame.
+       */
+      drop: 1,
     };
   }
 
@@ -976,7 +1029,33 @@ export function createCardScene(
     const g = progress;
     const u = uniforms;
 
-    const cardPos = cardAt(g);
+    /*
+     * The rise, integrated the same way the flip is and for the same reason:
+     * scroll says where the card should be pointing, a spring decides how it
+     * gets there. A card stood up by a rigid mapping from the wheel has no
+     * weight; one on a spring lags coming up and settles onto its own edge.
+     *
+     * Clamped to 1 past the descent so that every consumer of cardPos below
+     * sees the exact rest values from there on. The pivot's dolly is built
+     * against a card at the origin, and a spring still ringing by a
+     * thousandth when the camera starts pushing in would move the frame the
+     * handoff was measured on.
+     */
+    const riseTarget = g >= DESCENT.end ? 1 : easeInOutCubic(within(g, RISE));
+    {
+      const dt = Math.min(riseMs ? (nowMs - riseMs) / 1000 : 1 / 60, 1 / 30);
+      riseMs = nowMs;
+      riseVel += (RISE_K * (riseTarget - riseT) - RISE_D * riseVel) * dt;
+      riseT += riseVel * dt;
+      riseSettling =
+        Math.abs(riseTarget - riseT) > 1e-4 || Math.abs(riseVel) > 1e-4;
+      if (!riseSettling) {
+        riseT = riseTarget;
+        riseVel = 0;
+      }
+    }
+
+    const cardPos = cardAt(riseT);
     mesh.position.set(0, cardPos.y, cardPos.z);
 
     // Autonomous rotation, easing away once the user has scrolled. A sine is
@@ -1022,9 +1101,9 @@ export function createCardScene(
 
     // Cursor tilt, on top of the idle rather than instead of it, and scaled
     // by the same amount that retires the parallax. Both are gone by the time
-    // the card is landing.
+    // the card has finished coming up.
     mesh.rotation.y = idleY + flip - ptrX * TILT_Y * ptrAmt;
-    mesh.rotation.x = ptrY * TILT_X * ptrAmt;
+    mesh.rotation.x = cardPos.tilt + ptrY * TILT_X * ptrAmt;
 
     u.uBackInk.value = easeOutCubic(within(g, BACK_INK));
 
@@ -1056,15 +1135,38 @@ export function createCardScene(
      * Negative, because moving the camera left makes the card appear to move
      * right, and the card is meant to drift with the cursor.
      */
-    const dist = Math.max(cam.z - cardPos.z, 0.05);
+    /*
+     * The rig for the flat card.
+     *
+     * A card lying face up on a desk, shot from the standing card's camera,
+     * is a bright horizontal sliver: that camera is level with the card's
+     * middle and eight units back, so a card that has laid itself down and
+     * moved a card-height further away is both edge on and tiny. The QR is
+     * unreadable, which defeats the point of showing the printed face at all.
+     *
+     * So while the card is flat the camera has its own position entirely,
+     * close and looking down at roughly forty degrees, and it travels from
+     * there onto the path as the card comes up. Every term is scaled by
+     * `flat`, which is 0 the instant the card is standing, long before
+     * CONVERGE. From that point on this resolves to the path's own y and z
+     * and a level look-at, which is the straight-on dolly the pivot's fit
+     * calculations were derived against. Nothing downstream can tell it exists.
+     */
+    const flat = 1 - riseT;
+    const rigY = cam.y + (FLAT_CAM_Y - cam.y) * flat;
+    const rigZ = cam.z + (FLAT_CAM_Z - cam.z) * flat;
+
+    const dist = Math.max(rigZ - cardPos.z, 0.05);
     const worldPerPx = (2 * halfFovTan * dist) / Math.max(viewportH, 1);
     const off = CAM_PARALLAX_PX * worldPerPx * ptrAmt;
     const ox = -ptrX * off;
     const oy = ptrY * off;
 
-    camera.position.set(cam.x + ox, cam.y + oy, cam.z);
-    // Straight-on dolly: no rotation, so the framing maths above holds.
-    camera.lookAt(cam.x + ox, cam.y + oy, cardPos.z);
+    // Level with itself when standing, aimed at the card when flat.
+    const lookY = rigY + oy + (cardPos.y - (rigY + oy)) * flat;
+
+    camera.position.set(cam.x + ox, rigY + oy, rigZ);
+    camera.lookAt(cam.x + ox, lookY, cardPos.z);
 
     // Glass rises through the void and is gone by the time the card is paper
     // on a desk. That contrast is the point of the term existing at all.
@@ -1076,12 +1178,14 @@ export function createCardScene(
     u.uLanded.value = cardPos.drop;
     u.uBounce.value = cardPos.drop;
 
-    // The key drops lower and warms as the card comes down, then reaches out
-    // down the corridor, goes out entirely for the number, and comes back for
-    // the fan. One light, four stops, no fog.
-    u.uWarm.value.lerpColors(WARM_VOID, WARM_DESK, cardPos.drop);
+    // The key swings from over the flat card to raking across the standing
+    // one, then reaches out down the corridor, goes out entirely for the
+    // number, and comes back for the fan. One light, no fog.
+    u.uWarm.value.copy(WARM_DESK);
     if (g <= PIVOT.end) {
-      u.uLightPos.value.lerpVectors(KEY_VOID, KEY_DESK, cardPos.drop);
+      // At riseT = 1 this is KEY_DESK exactly, which is what beat 3 was lit
+      // and tuned against.
+      u.uLightPos.value.lerpVectors(KEY_FLAT, KEY_DESK, riseT);
       u.uLightNear.value = L_DESK.near;
       u.uLightFar.value = L_DESK.far;
     } else {
@@ -1185,7 +1289,7 @@ export function createCardScene(
     // While the intro rotation is alive, or the flip spring is still on its
     // way to where scroll has asked it to be, the scene is time-driven and
     // every frame is dirty. Once both are done we are back to scroll-driven.
-    if (introAmp > 0 || flipSettling) dirty = true;
+    if (introAmp > 0 || flipSettling || riseSettling) dirty = true;
     if (dirty) render(nowMs);
   }
 

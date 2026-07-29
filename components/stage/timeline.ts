@@ -136,14 +136,34 @@ const lerpRange = (r: Range, a: number, b: number): Range => ({
 });
 
 /**
- * The fall itself, which finishes well before beat 2 does. Everything the
- * landing drives — the contact shadow, the bounce, the death of the cool rim,
- * the glass going to zero — runs on this, so the card is settled and still
- * while the copy is being read.
+ * The rise.
+ *
+ * Since pass 07 the card does not fall, it gets up. It lies flat on the desk
+ * for the whole hero, face up, and comes to standing as the descent begins.
+ * A card that starts in mid air has to be explained; a card lying on a desk
+ * is just a card lying on a desk, which is the entire product.
+ *
+ * Spring driven off this, exactly like the flip, so it lags the scroll and
+ * settles rather than tracking it. It finishes early in the descent, because
+ * the flip has to follow it rather than fight it.
+ */
+export const RISE = {
+  start: DESCENT.start,
+  end: DESCENT.start + descentSpan * 0.34,
+} as const;
+
+/**
+ * What the edge terms run on: the cool rim and the glass fade out as the card
+ * comes up and are gone by the time it is standing.
+ *
+ * Named LANDING for continuity with every range that consumes it, and because
+ * what it still marks is the same moment it always did: the point after which
+ * the card is settled and still while the copy is being read. It no longer
+ * marks a fall, since there is not one.
  */
 export const LANDING = {
   start: DESCENT.start,
-  end: DESCENT.start + descentSpan * 0.55,
+  end: DESCENT.start + descentSpan * 0.44,
 } as const;
 
 /**
@@ -156,17 +176,19 @@ export const LANDING = {
  * landing instead of arriving exactly on it.
  */
 export const FLIP = {
-  start: DESCENT.start,
-  end: DESCENT.start + descentSpan * 0.55,
+  start: DESCENT.start + descentSpan * 0.36,
+  end: DESCENT.start + descentSpan * 0.68,
 } as const;
 
 /**
- * The line fading onto the back face. It starts as the card comes to rest,
- * not while it is still turning, because paper does not answer mid air.
+ * The exchange appearing on the back face. It starts once the turn has
+ * finished, not while the card is still moving, and it is over well before
+ * the pivot: the camera must not begin pushing into the stock while there is
+ * still copy resolving on it.
  */
 export const BACK_INK = {
-  start: DESCENT.start + descentSpan * 0.52,
-  end: DESCENT.start + descentSpan * 0.68,
+  start: DESCENT.start + descentSpan * 0.66,
+  end: DESCENT.start + descentSpan * 0.86,
 } as const;
 
 /**
