@@ -1,6 +1,7 @@
 import SmoothScroll from "@/lib/lenis";
 import Stage from "@/components/stage/Stage";
 import Footer from "@/components/site/Footer";
+import { PutYourName } from "@/components/flat/PutYourName";
 import { TypeSlab } from "@/components/flat/TypeSlab";
 import { AskIt } from "@/components/flat/AskIt";
 import { TheRoom } from "@/components/flat/TheRoom";
@@ -18,16 +19,17 @@ import { Pilot } from "@/components/flat/Pilot";
  * no camera — and is passed in here so the page reads as its own running
  * order rather than being buried inside the renderer.
  *
- *   1  the hero, then the descent        3D over the photographic plate
- *   2  the type slab                     flat
- *   3  the pivot into the card           3D
- *   4  ask it something                  flat, interactive
- *   5  the room                          flat, pinned horizontal strip
- *   6  every language                    flat
- *   7  corridor → the number             3D
- *   8  the staff screen                  flat
- *   9  plans                             flat
- *  10  the pilot, then the footer        flat
+ *   1  the hero, then the rise          3D over the photographic plate
+ *   2  put your property on it         flat, interactive
+ *   3  the type slab                   flat
+ *   4  the pivot into the card         3D
+ *   5  ask it something                flat, interactive
+ *   6  the room                        flat, pinned horizontal strip
+ *   7  every language                  flat
+ *   8  corridor → the number           3D
+ *   9  the staff screen                flat
+ *  10  plans                           flat
+ *  11  the pilot, then the footer      flat
  *
  * The staff screen sits where it does deliberately: here is what it does,
  * here is what it is worth, here is what it costs you to run, here is what
@@ -44,7 +46,12 @@ export default function Home() {
       <SmoothScroll />
       <main id="top">
         <Stage
-          afterDescent={<TypeSlab />}
+          afterDescent={
+            <>
+              <PutYourName />
+              <TypeSlab />
+            </>
+          }
           afterPivot={
             <>
               <AskIt />

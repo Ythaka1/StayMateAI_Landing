@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { QR_MODULES, qrGrid } from "@/lib/qr";
 
 /*
  * All card surface detail is procedural this pass so nothing blocks on
@@ -469,41 +470,25 @@ export function makePrintTexture(
   // Sized so the block spans x ±0.375 in card units, which leaves a blank
   // band from the card edge (-1.2) to -0.375 for the camera to terminate in.
   // scene.ts's QR_LEFT_X must match.
-  const modules = 25;
+  const modules = QR_MODULES;
   const qrSize = 240;
   const qrX = (W - qrSize) / 2;
   const qrY = 92;
   const m = qrSize / modules;
+  // Shared with the DOM card in the "put your property on it" section, so
+  // the two show the same code. See lib/qr.ts.
+  const grid = qrGrid();
 
   const draw = () => {
     ctx.clearRect(0, 0, W, H);
-    const rand = mulberry32(214);
-
-    const finder = (cx: number, cy: number) => {
-      ctx.fillStyle = INK;
-      ctx.fillRect(qrX + cx * m, qrY + cy * m, 7 * m, 7 * m);
-      ctx.clearRect(qrX + (cx + 1) * m, qrY + (cy + 1) * m, 5 * m, 5 * m);
-      ctx.fillStyle = INK;
-      ctx.fillRect(qrX + (cx + 2) * m, qrY + (cy + 2) * m, 3 * m, 3 * m);
-    };
-
-    const inFinder = (x: number, y: number) =>
-      (x < 8 && y < 8) ||
-      (x >= modules - 8 && y < 8) ||
-      (x < 8 && y >= modules - 8);
 
     ctx.fillStyle = INK;
     for (let y = 0; y < modules; y++) {
       for (let x = 0; x < modules; x++) {
-        if (inFinder(x, y)) continue;
-        if (rand() < 0.44) {
-          ctx.fillRect(qrX + x * m + 0.5, qrY + y * m + 0.5, m - 1, m - 1);
-        }
+        if (!grid[y][x]) continue;
+        ctx.fillRect(qrX + x * m + 0.5, qrY + y * m + 0.5, m - 1, m - 1);
       }
     }
-    finder(0, 0);
-    finder(modules - 7, 0);
-    finder(0, modules - 7);
 
     // A thin brass rule between the code and the name.
     ctx.fillStyle = BRASS;
