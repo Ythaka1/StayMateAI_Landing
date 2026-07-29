@@ -71,10 +71,17 @@ const ROWS: Row[] = [
   },
 ];
 
+/*
+ * These say who watches the screen, which the section described without ever
+ * answering. The order matters: the phone first, because that is where the
+ * work actually lands and it is a thing every front desk already has; the
+ * browser second, because that is the screen itself and it needs no hardware;
+ * and then the sentence that removes the job nobody wants to be given.
+ */
 const LINES = [
-  "No new system, and no logins for every member of staff.",
-  "Requests arrive with the room number already attached.",
-  "Anything urgent, and anything that should be handled by a person, goes straight to a person.",
+  "Requests arrive on the phone the front desk already uses.",
+  "The screen opens in a browser, on a computer they already have.",
+  "Nobody is assigned to watch it. It is where a manager looks when they want to see the day.",
 ];
 
 export function StaffScreen() {

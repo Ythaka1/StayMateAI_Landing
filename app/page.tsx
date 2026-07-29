@@ -7,6 +7,8 @@ import { AskIt } from "@/components/flat/AskIt";
 import { TheRoom } from "@/components/flat/TheRoom";
 import { EveryLanguage } from "@/components/flat/EveryLanguage";
 import { StaffScreen } from "@/components/flat/StaffScreen";
+import { LastQuestion } from "@/components/flat/LastQuestion";
+import { WorkingDay } from "@/components/flat/WorkingDay";
 import { Plans } from "@/components/flat/Plans";
 import { Pilot } from "@/components/flat/Pilot";
 
@@ -28,8 +30,10 @@ import { Pilot } from "@/components/flat/Pilot";
  *   7  every language                  flat
  *   8  corridor → the number           3D
  *   9  the staff screen                flat
- *  10  plans                           flat
- *  11  the pilot, then the footer      flat
+ *  10  the last question               flat
+ *  11  nothing new to watch            flat
+ *  12  plans                           flat
+ *  13  the pilot, then the footer      flat
  *
  * The staff screen sits where it does deliberately: here is what it does,
  * here is what it is worth, here is what it costs you to run, here is what
@@ -62,6 +66,8 @@ export default function Home() {
           afterCorridor={
             <>
               <StaffScreen />
+              <LastQuestion />
+              <WorkingDay />
               <Plans />
               <Pilot />
             </>
