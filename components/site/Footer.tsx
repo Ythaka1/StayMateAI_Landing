@@ -1,4 +1,10 @@
-import { CONTACT_EMAIL, WHATSAPP_HREF } from "@/lib/contact";
+import {
+  CONTACT_EMAIL,
+  CONTACT_PHONE_DISPLAY,
+  CONTACT_PHONE_HREF,
+  PRIMARY_CTA,
+  WHATSAPP_HREF,
+} from "@/lib/contact";
 
 /*
  * Quiet. A wordmark, one line, the demo, and a way to reach a person. No
@@ -21,18 +27,26 @@ export default function Footer() {
             A concierge that lives on a card on the desk.
           </p>
         </div>
-        <nav className="flex gap-7 font-body text-[0.8125rem] text-paper/60">
+        {/* Wraps rather than scrolls: the address is long, and on a narrow
+            window three items in a row would push the phone off the edge. */}
+        <nav className="flex flex-wrap gap-x-7 gap-y-2 font-body text-[0.8125rem] text-paper/60">
           <a
             href={WHATSAPP_HREF}
             className="underline-offset-4 transition-colors hover:text-paper hover:underline"
           >
-            See a demo
+            {PRIMARY_CTA}
           </a>
           <a
             href={`mailto:${CONTACT_EMAIL}`}
             className="underline-offset-4 transition-colors hover:text-paper hover:underline"
           >
             {CONTACT_EMAIL}
+          </a>
+          <a
+            href={CONTACT_PHONE_HREF}
+            className="whitespace-nowrap underline-offset-4 transition-colors hover:text-paper hover:underline"
+          >
+            {CONTACT_PHONE_DISPLAY}
           </a>
         </nav>
       </div>

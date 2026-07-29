@@ -1,6 +1,12 @@
 import { PhotoField } from "./PhotoField";
 import { Reveal } from "./Reveal";
-import { WHATSAPP_HREF } from "@/lib/contact";
+import {
+  CONTACT_EMAIL,
+  CONTACT_PHONE_DISPLAY,
+  CONTACT_PHONE_HREF,
+  PRIMARY_CTA,
+  WHATSAPP_HREF,
+} from "@/lib/contact";
 
 /*
  * Section 9 — the pilot.
@@ -36,8 +42,16 @@ export function Pilot() {
       />
 
       <div className="relative mx-auto w-full max-w-[36rem] text-center">
+        {/*
+          Was "The pilot", which is the same opaque word the nav link carried
+          and for the same reason: it names a thing this site invented. It is
+          not replaced with "Book a demo" here, though, because that is what
+          the button forty lines below already says, and an eyebrow that
+          repeats its own call to action is furniture. This names the offer
+          instead, which is what the heading under it goes on to explain.
+        */}
         <p className="font-body text-[0.6875rem] uppercase tracking-[0.2em] text-brass">
-          The pilot
+          Thirty days, free
         </p>
 
         <h2
@@ -69,13 +83,41 @@ export function Pilot() {
           ))}
         </ul>
 
-        {/* The only conversion point on the site. */}
+        {/*
+          WhatsApp stays the primary action: it is the one channel a hotelier
+          in this market will already have open, and it needs no address book
+          entry, no subject line and no ringing phone.
+
+          Email and phone sit under it, quiet and small. They are there for
+          the manager who does not use WhatsApp for business, or who wants to
+          forward something to an owner, and for the simple reason that a page
+          asking a stranger for thirty days of his hotel should be willing to
+          show him a way to call.
+        */}
         <a
           href={WHATSAPP_HREF}
           className="mt-11 inline-block rounded-full bg-felt px-8 py-3.5 font-body text-[0.875rem] font-medium tracking-wide text-paper transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-paper"
         >
-          Start the pilot on WhatsApp
+          {PRIMARY_CTA} on WhatsApp
         </a>
+
+        <p className="mt-7 font-body text-[0.8125rem] leading-relaxed text-paper/45">
+          <a
+            href={`mailto:${CONTACT_EMAIL}`}
+            className="underline-offset-4 transition-colors hover:text-paper/80 hover:underline"
+          >
+            {CONTACT_EMAIL}
+          </a>
+          <span aria-hidden="true" className="px-2.5 text-paper/25">
+            &middot;
+          </span>
+          <a
+            href={CONTACT_PHONE_HREF}
+            className="whitespace-nowrap underline-offset-4 transition-colors hover:text-paper/80 hover:underline"
+          >
+            {CONTACT_PHONE_DISPLAY}
+          </a>
+        </p>
       </div>
     </section>
   );

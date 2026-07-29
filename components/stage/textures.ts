@@ -1,5 +1,11 @@
 import * as THREE from "three";
 import { QR_MODULES, qrGrid } from "@/lib/qr";
+import {
+  BACK_GUEST,
+  BACK_LAST,
+  BACK_REPLY,
+  DEFAULT_PROPERTY,
+} from "@/lib/cardText";
 
 /*
  * All card surface detail is procedural this pass so nothing blocks on
@@ -570,58 +576,6 @@ export function makeBackTexture(onRedraw?: () => void): THREE.Texture {
 }
 
 /**
- * The exchange on the back of the card.
- *
- * The front is a printed object. The back is that same printed object holding
- * a live conversation, which is the entire product in one image and the
- * reason the card turns over at all.
- *
- * Deliberately generic: no currency, no place names, nothing that ties it to
- * one market. Towels are towels everywhere.
- */
-export const BACK_GUEST = "Can I get extra towels?";
-export const BACK_REPLY = "Of course. On their way up.";
-
-/**
- * Where the last word's arrival begins, on the 0..1 reveal. The shader gives
- * every word the same window past its ordinal, so the tail needs somewhere to
- * run: at 1.0 the final word would still be arriving when the reveal ends.
- */
-export const BACK_LAST = 0.82;
-
-/** The exchange, as plain text, for the reduced-motion path's DOM copy. */
-export const BACK_FACE_LINES = [BACK_GUEST, BACK_REPLY] as const;
-
-/**
- * The neutral property the card carries by default.
- *
- * Nowhere in particular, and pronounceable in most places. The card is never
- * blank: a mock-up with a placeholder box where the name goes is a mock-up,
- * and this has to read as a printed card that already exists.
- */
-export const DEFAULT_PROPERTY = "The Laurel";
-
-/** As much of a name as the card can carry before it stops being a card. */
-export const PROPERTY_MAX = 28;
-
-/**
- * Strip a typed property name down to something that can be printed.
- *
- * Not a security measure, since nothing here is stored, sent, or interpreted
- * as anything but glyphs on a canvas. It exists because a card is a physical
- * object: it has no line breaks, no tabs, no runs of twelve spaces, and no
- * room for a paragraph. Letters, marks, spaces and the handful of characters
- * that legitimately appear in hotel names survive; everything else does not.
- */
-export function cleanProperty(raw: string): string {
-  return raw
-    .replace(/[\r\n\t]+/g, " ")
-    .replace(/[^\p{L}\p{M}\p{N}&'’.,\- ]/gu, "")
-    .replace(/\s{2,}/g, " ")
-    .slice(0, PROPERTY_MAX);
-}
-
-/**
  * The printed face of the card.
  *
  * ── The hierarchy, which is the whole point ──────────────────────────────
@@ -644,10 +598,17 @@ export function cleanProperty(raw: string): string {
  * immediately with whatever is resolved and redrawn in place once the font
  * arrives; `onRedraw` lets the scene mark itself dirty when that happens.
  */
+export interface PrintTexture {
+  texture: THREE.Texture;
+  /** Repaints the text band only. Cheap enough to call from a debounce. */
+  setProperty(name: string): void;
+  dispose(): void;
+}
+
 export function makePrintTexture(
   onRedraw?: () => void,
-  property: string = DEFAULT_PROPERTY
-): THREE.Texture {
+  initial: string = DEFAULT_PROPERTY
+): PrintTexture {
   const W = 768;
   const H = 1024;
   const canvas = document.createElement("canvas");
@@ -658,6 +619,20 @@ export function makePrintTexture(
   const INK = "#15171b";
   const BRASS = "#a07e45";
   const MUTED = "#6c6860";
+
+  let property = initial;
+
+  /*
+   * Where the fixed half of the card ends and the typed half begins.
+   *
+   * Everything above this line is drawn once and never again: the code block,
+   * and the brass rule under it. Everything below it is the property's name,
+   * the instruction and our mark at the foot, and that band is the only thing
+   * a keystroke repaints. Redrawing the whole card would mean regenerating
+   * six hundred and twenty-five modules of pseudorandom fill to change one
+   * word.
+   */
+  const TEXT_TOP = 402;
 
   // QR-like block: 25 modules, finder squares in three corners, random
   // fill elsewhere. Deliberately not a scannable code — it's set dressing.
@@ -673,8 +648,9 @@ export function makePrintTexture(
   // the two show the same code. See lib/qr.ts.
   const grid = qrGrid();
 
-  const draw = () => {
-    ctx.clearRect(0, 0, W, H);
+  /** The half that never changes. Drawn once. */
+  const drawFixed = () => {
+    ctx.clearRect(0, 0, W, TEXT_TOP);
 
     ctx.fillStyle = INK;
     for (let y = 0; y < modules; y++) {
@@ -687,6 +663,11 @@ export function makePrintTexture(
     // A thin brass rule between the code and the name.
     ctx.fillStyle = BRASS;
     ctx.fillRect(W / 2 - 54, qrY + qrSize + 62, 108, 2);
+  };
+
+  /** The half a keystroke changes. Clears and repaints only its own band. */
+  const drawText = () => {
+    ctx.clearRect(0, TEXT_TOP, W, H - TEXT_TOP);
 
     const display = displayFamily();
     const body = bodyFamily();
@@ -727,7 +708,8 @@ export function makePrintTexture(
     drawTracked(ctx, "STAYMATE", W / 2, H - 58, 17, body, 0.3);
   };
 
-  draw();
+  drawFixed();
+  drawText();
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.minFilter = THREE.LinearMipmapLinearFilter;
@@ -743,7 +725,8 @@ export function makePrintTexture(
     ])
       .then(() => document.fonts.ready)
       .then(() => {
-        draw();
+        // Only the text band is font-dependent; the code block is rectangles.
+        drawText();
         tex.needsUpdate = true;
         onRedraw?.();
       })
@@ -752,7 +735,27 @@ export function makePrintTexture(
       });
   }
 
-  return tex;
+  return {
+    texture: tex,
+    setProperty(name: string) {
+      const next = name.trim() === "" ? DEFAULT_PROPERTY : name;
+      if (next === property) return;
+      property = next;
+      /*
+       * One canvas, one texture, for the life of the scene. needsUpdate re-
+       * uploads the existing GL texture object rather than creating another,
+       * so typing a name costs one texImage2D and allocates nothing. A new
+       * THREE.CanvasTexture per keystroke would leak a GPU texture per
+       * character unless every one of them were disposed by hand.
+       */
+      drawText();
+      tex.needsUpdate = true;
+      onRedraw?.();
+    },
+    dispose() {
+      tex.dispose();
+    },
+  };
 }
 
 /**

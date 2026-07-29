@@ -479,6 +479,19 @@ export interface CardScene {
   /** Ends beat 1's autonomous rotation. Idempotent; it never restarts. */
   releaseIntro(): void;
   /**
+   * The property printed on every card.
+   *
+   * Repaints the text band of the one print texture the whole scene shares,
+   * which is the same texture all eighteen instanced cards in the corridor
+   * and the fan sample. One call therefore changes every card at once,
+   * allocates nothing, and does not touch the draw call count.
+   *
+   * Not debounced here: the caller owns the cadence, and Stage debounces it
+   * to 120ms after the last keystroke.
+   */
+  setProperty(name: string): void;
+
+  /**
    * Pointer position, already spring damped, as -1..1 from the centre of the
    * viewport, plus how much of it should apply right now (1 in the hero, 0
    * once the descent has taken over).
@@ -596,7 +609,7 @@ export function createCardScene(
 
   const uniforms: Record<string, THREE.IUniform> = {
       uGrain: { value: grain },
-      uPrint: { value: print },
+      uPrint: { value: print.texture },
       uStock: { value: stockPlaceholder },
       uStockAmt: { value: 0 },
       uBack: { value: backTex },
@@ -1321,6 +1334,9 @@ export function createCardScene(
       if (introReleasedAt === 0 && introAmp > 0) {
         introReleasedAt = performance.now();
       }
+    },
+    setProperty(name: string) {
+      print.setProperty(name);
     },
     setPointer(x: number, y: number, amount: number) {
       if (x === ptrX && y === ptrY && amount === ptrAmt) return;

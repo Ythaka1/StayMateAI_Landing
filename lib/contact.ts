@@ -1,11 +1,11 @@
 /*
- * The one place the site reaches a person.
+ * The three ways this site reaches a person.
  *
  * ── SWAP SEAM ─────────────────────────────────────────────────────────────
- * WHATSAPP_NUMBER is a placeholder. Replace it with the property-facing
- * number in full international form, digits only, no + and no spaces
- * (wa.me will not accept anything else). Nothing else on the site needs to
- * change — every button and link on the page reads from here.
+ * WHATSAPP_NUMBER is the placeholder. Replace it with the property-facing
+ * number in full international form, digits only, no plus and no spaces
+ * (wa.me will not accept anything else). Nothing else needs to change: every
+ * button and link on the page reads from here.
  * ──────────────────────────────────────────────────────────────────────────
  */
 export const WHATSAPP_NUMBER = "10000000000";
@@ -13,10 +13,36 @@ export const WHATSAPP_NUMBER = "10000000000";
 /** True while the placeholder is still in place. Used to mark it in dev. */
 export const WHATSAPP_IS_PLACEHOLDER = WHATSAPP_NUMBER === "10000000000";
 
-const message = "I'd like to try the StayMate 30-day pilot.";
+const message = "I'd like to book a StayMate demo.";
 
 export const WHATSAPP_HREF =
   `https://wa.me/${WHATSAPP_NUMBER}?text=` + encodeURIComponent(message);
 
-/** ── SWAP SEAM ── the address the footer writes to. */
-export const CONTACT_EMAIL = "hello@staymate.ai";
+export const CONTACT_EMAIL = "hakimcastro41@gmail.com";
+
+/**
+ * The phone, written and dialled in full international form.
+ *
+ * Displayed with the country code visible rather than as the local 07 form.
+ * This site is aimed at properties well outside Kenya, and a number that
+ * begins 07 is either unreachable or quietly wrong from anywhere else: a
+ * hotelier in Lisbon reading it has no way to know what to put in front of
+ * it, and most will not go looking.
+ *
+ * DISPLAY carries the spaces a person reads by; HREF carries none, because
+ * spaces in a tel: URI are not reliably handled and the dialler only wants
+ * the digits.
+ */
+export const CONTACT_PHONE_DISPLAY = "+254 704 925 908";
+export const CONTACT_PHONE_HREF = "tel:+254704925908";
+
+/**
+ * What the one link in the nav says, and what the pilot's button says.
+ *
+ * "The pilot" was opaque. It names a thing this site invented and a general
+ * manager has no reason to recognise; it could be a plan, a programme, or a
+ * page about aviation. "Book a demo" says what pressing it does. The pilot
+ * itself keeps its framing further down the page, thirty days free and no
+ * contract, where there is room to explain it.
+ */
+export const PRIMARY_CTA = "Book a demo";

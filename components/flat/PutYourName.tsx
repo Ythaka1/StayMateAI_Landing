@@ -1,14 +1,11 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId } from "react";
 import Image from "next/image";
 import { PropertyCard } from "./PropertyCard";
 import { Reveal } from "./Reveal";
-import {
-  DEFAULT_PROPERTY,
-  PROPERTY_MAX,
-  cleanProperty,
-} from "@/components/stage/textures";
+import { DEFAULT_PROPERTY, PROPERTY_MAX } from "@/lib/cardText";
+import { useProperty } from "@/lib/property";
 
 /*
  * Put your property on it.
@@ -41,13 +38,10 @@ import {
  */
 export function PutYourName() {
   const inputId = useId();
-  const [typed, setTyped] = useState("");
-
-  // cleanProperty runs on the way in, so state only ever holds something a
-  // card could actually carry. The input is controlled by that same value, so
-  // a pasted newline visibly does not appear rather than silently vanishing
-  // between the field and the card.
-  const shown = typed.trim() === "" ? DEFAULT_PROPERTY : typed;
+  // One string, shared by every card on the site. `raw` controls the field so
+  // a trailing space someone is mid-way through typing does not vanish from
+  // under the cursor; `name` is what the cards print, cleaned and never empty.
+  const { name, raw, setRaw } = useProperty();
 
   return (
     <section
@@ -105,8 +99,8 @@ export function PutYourName() {
             <input
               id={inputId}
               type="text"
-              value={typed}
-              onChange={(e) => setTyped(cleanProperty(e.target.value))}
+              value={raw}
+              onChange={(e) => setRaw(e.target.value)}
               placeholder={DEFAULT_PROPERTY}
               maxLength={PROPERTY_MAX}
               autoComplete="off"
@@ -134,11 +128,11 @@ export function PutYourName() {
           and a footer on every keystroke is not that.
         */}
         <div className="mx-auto w-full max-w-[19rem] lg:mx-0" aria-hidden="true">
-          <PropertyCard property={shown} />
+          <PropertyCard property={name} />
         </div>
 
         <p className="sr-only" aria-live="polite">
-          The card now reads {shown}.
+          The card now reads {name}.
         </p>
       </div>
     </section>

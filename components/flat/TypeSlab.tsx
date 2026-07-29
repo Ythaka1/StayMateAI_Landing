@@ -1,4 +1,5 @@
-import { PhotoField } from "./PhotoField";
+import Image from "next/image";
+import { PlateName } from "./PlateName";
 import { Reveal } from "./Reveal";
 
 /*
@@ -40,29 +41,63 @@ export function TypeSlab() {
       className="relative flex min-h-[100svh] items-end overflow-hidden bg-night px-6 py-24 sm:items-center sm:px-10 sm:py-28"
       aria-labelledby="slab-heading"
     >
-      <PhotoField
-        src="/media/card.png"
-        className="absolute inset-0 sm:inset-y-0 sm:right-auto sm:w-[58%]"
-        sizes="(min-width: 640px) 58vw, 100vw"
-        // 45% rather than centre: the card sits left of the plate's middle,
-        // and this brings it back to the middle of the panel.
-        position="45% center"
-        /*
-         * Two ramps, and the breakpoint decides which one is doing the work.
-         *
-         * Horizontally: the card itself is barely touched, because it is the
-         * subject; the panel's inner edge runs to solid night so there is no
-         * visible seam where the photograph stops and the section starts.
-         *
-         * Vertically: a light deepening top and bottom, which does nothing on
-         * a wide screen and is what makes the type legible on a narrow one,
-         * where this is a full bleed and the copy sits over the foreground.
-         */
-        scrim={[
-          "linear-gradient(90deg, rgba(11,12,14,0.55) 0%, rgba(11,12,14,0.16) 22%, rgba(11,12,14,0.16) 72%, rgba(11,12,14,0.78) 91%, rgba(11,12,14,1) 100%)",
-          "linear-gradient(180deg, rgba(11,12,14,0.3) 0%, rgba(11,12,14,0) 34%, rgba(11,12,14,0.55) 100%)",
-        ].join(",")}
-      />
+      {/*
+        The plate, and the name printed on it.
+
+        Not PhotoField here, and the difference is load bearing. PhotoField
+        fills its box with object-cover, which crops the photograph by an
+        amount that depends on the box's aspect, so a percentage inside that
+        box is a percentage of a crop that changes with the viewport. The name
+        overlay has to sit on the card's face at every window size, so instead
+        the inner box is sized to the photograph's own aspect with container
+        query units: it covers the panel, it is exactly the photograph, and a
+        percentage inside it is a percentage of the image.
+      */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 overflow-hidden bg-night sm:right-auto sm:w-[58%]"
+        style={{ containerType: "size" }}
+      >
+        <div
+          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
+          style={{
+            // Cover, at the photograph's exact 1122:1402.
+            width: "max(100cqw, calc(100cqh * 0.80028))",
+            height: "max(calc(100cqw / 0.80028), 100cqh)",
+            containerType: "inline-size",
+          }}
+        >
+          <Image
+            src="/media/card.png"
+            alt=""
+            fill
+            sizes="(min-width: 640px) 62vw, 110vw"
+            className="object-cover"
+          />
+          <PlateName />
+        </div>
+
+        {/*
+          Two ramps, and the breakpoint decides which one is doing the work.
+
+          Horizontally: the card itself is barely touched, because it is the
+          subject; the panel's inner edge runs to solid night so there is no
+          visible seam where the photograph stops and the section starts.
+
+          Vertically: a light deepening top and bottom, which does nothing on
+          a wide screen and is what makes the type legible on a narrow one,
+          where this is a full bleed and the copy sits over the foreground.
+        */}
+        <div
+          className="absolute inset-0"
+          style={{
+            background: [
+              "linear-gradient(90deg, rgba(11,12,14,0.55) 0%, rgba(11,12,14,0.16) 22%, rgba(11,12,14,0.16) 72%, rgba(11,12,14,0.78) 91%, rgba(11,12,14,1) 100%)",
+              "linear-gradient(180deg, rgba(11,12,14,0.3) 0%, rgba(11,12,14,0) 34%, rgba(11,12,14,0.55) 100%)",
+            ].join(","),
+          }}
+        />
+      </div>
 
       {/*
         Narrow only. With two columns the copy is beside the card and the

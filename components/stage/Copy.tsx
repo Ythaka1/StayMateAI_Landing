@@ -1,7 +1,7 @@
 "use client";
 
 import { forwardRef } from "react";
-import { BACK_FACE_LINES } from "./textures";
+import { BACK_FACE_LINES } from "@/lib/cardText";
 
 /*
  * The DOM copy for beats 1 and 2. These sit over the canvas and their opacity

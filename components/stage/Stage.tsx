@@ -33,6 +33,7 @@ import {
 } from "./timeline";
 import { getLenis } from "@/lib/lenis";
 import { createPointerSpring } from "@/lib/pointer";
+import { useProperty } from "@/lib/property";
 
 /*
  * The 3D, and only the 3D.
@@ -144,6 +145,11 @@ export default function Stage({
   const [active, setActive] = useState(0);
   const activeRef = useRef(0);
 
+  // Held so the debounce effect below can reach the scene the main effect
+  // built. The scene is otherwise entirely local to that effect.
+  const sceneRef = useRef<CardScene | null>(null);
+  const { name } = useProperty();
+
   useEffect(() => {
     const canvas = canvasRef.current;
     const hero = heroRef.current;
@@ -192,6 +198,7 @@ export default function Stage({
     let scene: CardScene;
     try {
       scene = createCardScene(canvas, { isMobile: window.innerWidth < 768 });
+      sceneRef.current = scene;
     } catch (err) {
       // Without this the page just stays dark with nothing to read.
       if (DEBUG) stageDebug.fatal = String(err instanceof Error ? err.stack : err);
@@ -505,9 +512,38 @@ export default function Stage({
         if (parallaxRaf) cancelAnimationFrame(parallaxRaf);
         spring.destroy();
       }
+      sceneRef.current = null;
       scene.dispose();
     };
   }, []);
+
+  /*
+   * The typed property, into the canvas.
+   *
+   * Debounced to 120ms after the last keystroke. The DOM cards update on the
+   * keystroke itself, because changing a string in the DOM is free; this one
+   * repaints a 768x1024 canvas and re-uploads it to the GPU, and doing that
+   * per character while somebody types their hotel's name is how a page that
+   * feels expensive starts to feel cheap.
+   *
+   * What it repaints is only the text band of the print texture. The code
+   * block above it is untouched, the canvas and the THREE.CanvasTexture are
+   * the same two objects for the life of the scene, and nothing is allocated:
+   * needsUpdate re-uploads the existing GL texture rather than making
+   * another. All eighteen instanced cards sample that one texture, so this
+   * changes every card in the corridor and the fan at once and leaves the
+   * draw call count exactly where it was.
+   *
+   * Under reduced motion there is no scene at all and sceneRef stays null,
+   * which is correct: the DOM cards still update, and they are the only cards
+   * that exist in that mode.
+   */
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      sceneRef.current?.setProperty(name);
+    }, 120);
+    return () => window.clearTimeout(id);
+  }, [name]);
 
   /**
    * Keyboard reachability: tabbing into a panel that is off-frame moves the

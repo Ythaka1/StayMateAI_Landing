@@ -1,4 +1,5 @@
 import SmoothScroll from "@/lib/lenis";
+import { PropertyProvider } from "@/lib/property";
 import Stage from "@/components/stage/Stage";
 import Footer from "@/components/site/Footer";
 import { PutYourName } from "@/components/flat/PutYourName";
@@ -46,7 +47,7 @@ import { Pilot } from "@/components/flat/Pilot";
  */
 export default function Home() {
   return (
-    <>
+    <PropertyProvider>
       <SmoothScroll />
       <main id="top">
         <Stage
@@ -75,6 +76,6 @@ export default function Home() {
         />
       </main>
       <Footer />
-    </>
+    </PropertyProvider>
   );
 }

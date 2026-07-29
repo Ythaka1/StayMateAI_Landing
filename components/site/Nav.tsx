@@ -1,7 +1,7 @@
 "use client";
 
 import { forwardRef } from "react";
-import { WHATSAPP_HREF } from "@/lib/contact";
+import { PRIMARY_CTA, WHATSAPP_HREF } from "@/lib/contact";
 
 /*
  * Transparent, floating, no fill and no border. It fades in only once the
@@ -45,7 +45,7 @@ export const Nav = forwardRef<HTMLElement>(function Nav(_, ref) {
         href={WHATSAPP_HREF}
         className="pointer-events-auto font-body text-[0.8125rem] text-white/75 underline-offset-4 transition-colors hover:text-white hover:underline"
       >
-        The pilot
+        {PRIMARY_CTA}
       </a>
     </header>
   );
