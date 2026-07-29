@@ -398,17 +398,61 @@ export function makeBackTexture(onRedraw?: () => void): THREE.Texture {
 export const BACK_FACE_LINE = "Good evening. What can I get you?";
 
 /**
- * The printed layer of the tent card: QR-like block upper-centre, a brass
- * rule, the wordmark, one muted line. Canvas aspect matches the card
- * (3:4) so card-space squares stay square.
+ * The neutral property the card carries by default.
  *
- * The card is on screen for two full beats before the seam, so the wordmark
- * is set in the real display face. Webfonts are not available synchronously
- * and there is no loading screen in this site, so the texture is drawn
- * immediately with whatever is resolved and redrawn in place once the font
- * arrives — `onRedraw` lets the scene mark itself dirty when that happens.
+ * Nowhere in particular, and pronounceable in most places. The card is never
+ * blank: a mock-up with a placeholder box where the name goes is a mock-up,
+ * and this has to read as a printed card that already exists.
  */
-export function makePrintTexture(onRedraw?: () => void): THREE.Texture {
+export const DEFAULT_PROPERTY = "The Laurel";
+
+/** As much of a name as the card can carry before it stops being a card. */
+export const PROPERTY_MAX = 28;
+
+/**
+ * Strip a typed property name down to something that can be printed.
+ *
+ * Not a security measure, since nothing here is stored, sent, or interpreted
+ * as anything but glyphs on a canvas. It exists because a card is a physical
+ * object: it has no line breaks, no tabs, no runs of twelve spaces, and no
+ * room for a paragraph. Letters, marks, spaces and the handful of characters
+ * that legitimately appear in hotel names survive; everything else does not.
+ */
+export function cleanProperty(raw: string): string {
+  return raw
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/[^\p{L}\p{M}\p{N}&'’.,\- ]/gu, "")
+    .replace(/\s{2,}/g, " ")
+    .slice(0, PROPERTY_MAX);
+}
+
+/**
+ * The printed face of the card.
+ *
+ * ── The hierarchy, which is the whole point ──────────────────────────────
+ * Top to bottom: the QR, a brass rule, the property's name set larger than
+ * anything else on the card, the one line telling a guest what to do with it,
+ * and then, at the very bottom edge and very quiet, StayMate.
+ *
+ * That order is deliberate and it is the reverse of what this used to be. The
+ * card sits in someone else's hotel room. A general manager looking at it has
+ * to see his own property's card, printed for him, with a supplier's mark
+ * discreetly at the foot of it, the way a printer signs a menu. A card with
+ * our name across the middle of it is an advertisement we are asking him to
+ * put in every room, and no hotel of the sort worth having says yes to that.
+ *
+ * Canvas aspect matches the card (3:4) so card-space squares stay square.
+ *
+ * The card is on screen for two full beats before the seam, so the type is
+ * set in the real display face. Webfonts are not available synchronously and
+ * there is no loading screen on this site, so the texture is drawn
+ * immediately with whatever is resolved and redrawn in place once the font
+ * arrives; `onRedraw` lets the scene mark itself dirty when that happens.
+ */
+export function makePrintTexture(
+  onRedraw?: () => void,
+  property: string = DEFAULT_PROPERTY
+): THREE.Texture {
   const W = 768;
   const H = 1024;
   const canvas = document.createElement("canvas");
@@ -461,20 +505,47 @@ export function makePrintTexture(onRedraw?: () => void): THREE.Texture {
     finder(modules - 7, 0);
     finder(0, modules - 7);
 
-    // Brass rule under the QR.
+    // A thin brass rule between the code and the name.
     ctx.fillStyle = BRASS;
-    ctx.fillRect(W / 2 - 60, qrY + qrSize + 78, 120, 3);
+    ctx.fillRect(W / 2 - 54, qrY + qrSize + 62, 108, 2);
 
-    const family = displayFamily();
+    const display = displayFamily();
+    const body = bodyFamily();
     ctx.textAlign = "center";
 
+    /*
+     * The property's name, set as large as it will go.
+     *
+     * Tracked by hand rather than with ctx.letterSpacing, which is recent
+     * enough that a browser without it would silently print the name solid
+     * while every other letterspaced thing on the site stayed open.
+     *
+     * The size is fitted rather than fixed: a long name shrinks to fit the
+     * measure instead of running off the stock, because "The Grand Pavilion
+     * and Spa" has to look printed too.
+     */
+    const NAME_MAX_W = W - 150;
+    const tracking = 0.1;
+    let size = 68;
+    while (size > 26 && trackedWidth(ctx, property, size, display, tracking) > NAME_MAX_W) {
+      size -= 2;
+    }
     ctx.fillStyle = INK;
-    ctx.font = `600 54px ${family}`;
-    ctx.fillText("S T A Y M A T E", W / 2, qrY + qrSize + 168);
+    drawTracked(ctx, property, W / 2, qrY + qrSize + 148, size, display, tracking);
 
+    // What to do with it. Body face, because this is an instruction and not
+    // a mark.
     ctx.fillStyle = MUTED;
-    ctx.font = `26px ${family}`;
-    ctx.fillText("Scan for your concierge", W / 2, qrY + qrSize + 224);
+    ctx.font = `24px ${body}`;
+    ctx.fillText("Scan for your concierge", W / 2, qrY + qrSize + 208);
+
+    /*
+     * Ours, at the foot of the card, at the size a printer signs a menu.
+     * Small enough that a guest never reads it and a manager only finds it
+     * if he goes looking.
+     */
+    ctx.fillStyle = MUTED;
+    drawTracked(ctx, "STAYMATE", W / 2, H - 58, 17, body, 0.3);
   };
 
   draw();
@@ -485,12 +556,11 @@ export function makePrintTexture(onRedraw?: () => void): THREE.Texture {
   tex.generateMipmaps = true;
   tex.needsUpdate = true;
 
-  // Redraw once the display face has actually loaded. No gate on first paint.
+  // Redraw once the faces have actually loaded. No gate on first paint.
   if (typeof document !== "undefined" && document.fonts) {
-    const family = displayFamily();
     Promise.all([
-      document.fonts.load(`600 54px ${family}`),
-      document.fonts.load(`26px ${family}`),
+      document.fonts.load(`68px ${displayFamily()}`),
+      document.fonts.load(`24px ${bodyFamily()}`),
     ])
       .then(() => document.fonts.ready)
       .then(() => {
@@ -504,4 +574,59 @@ export function makePrintTexture(onRedraw?: () => void): THREE.Texture {
   }
 
   return tex;
+}
+
+/**
+ * Letterspaced text, drawn a glyph at a time.
+ *
+ * `ctx.letterSpacing` exists but is recent, and a browser without it fails
+ * silently: the name would print solid while every other tracked thing on
+ * the site stayed open, which looks like a mistake rather than a fallback.
+ * Tracking is in ems, so it scales with the size the way it should.
+ */
+function drawTracked(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  cx: number,
+  y: number,
+  size: number,
+  family: string,
+  tracking: number
+) {
+  ctx.font = `${size}px ${family}`;
+  const gap = size * tracking;
+  const total = trackedWidth(ctx, text, size, family, tracking);
+  const prev = ctx.textAlign;
+  ctx.textAlign = "left";
+  let x = cx - total / 2;
+  for (const ch of text) {
+    ctx.fillText(ch, x, y);
+    x += ctx.measureText(ch).width + gap;
+  }
+  ctx.textAlign = prev;
+}
+
+/** Width the same text would occupy through drawTracked. */
+function trackedWidth(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  size: number,
+  family: string,
+  tracking: number
+): number {
+  ctx.font = `${size}px ${family}`;
+  const chars = [...text];
+  if (chars.length === 0) return 0;
+  let w = 0;
+  for (const ch of chars) w += ctx.measureText(ch).width;
+  // One fewer gap than glyphs: the trailing gap is not part of the word.
+  return w + size * tracking * (chars.length - 1);
+}
+
+/** The body face, as next/font named it. Same trick as displayFamily. */
+function bodyFamily(): string {
+  const v = getComputedStyle(document.documentElement)
+    .getPropertyValue("--font-public-sans")
+    .trim();
+  return v ? `${v}, system-ui, sans-serif` : "system-ui, sans-serif";
 }
