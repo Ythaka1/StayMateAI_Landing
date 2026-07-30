@@ -56,10 +56,12 @@ export function Panel({
         "relative flex w-1/4 shrink-0 flex-col justify-center",
         "h-full px-6 outline-none",
         "focus-visible:ring-2 focus-visible:ring-felt/50 focus-visible:ring-inset",
-        // Reduced motion: stacked full-width static sections.
-        "motion-reduce:h-auto motion-reduce:w-full",
-        "motion-reduce:border-t motion-reduce:border-brass/20",
-        "motion-reduce:py-20 sm:px-10",
+        // Tier 3 only: stacked full-width static sections. Tier 2 keeps the
+        // strip and its scroll-driven travel, which is linear (see `within`
+        // in timeline.ts) and so has no easing and no lag to remove.
+        "tier-static:h-auto tier-static:w-full",
+        "tier-static:border-t tier-static:border-brass/20",
+        "tier-static:py-20 sm:px-10",
       ].join(" ")}
     >
       <motion.div

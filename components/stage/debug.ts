@@ -30,6 +30,8 @@ export interface StageDebug {
   dpr: number;
   pixelRatio: number;
   reducedMotion: string;
+  /** Which of the three tiers this page settled on, and why. */
+  tier: string;
   /** Global stage progress, and whether a scroll event has ever moved it. */
   progress: number;
   scrollEvents: number;
@@ -63,6 +65,7 @@ export const stageDebug: StageDebug = {
   dpr: 0,
   pixelRatio: 0,
   reducedMotion: "unknown",
+  tier: "undecided",
   progress: 0,
   scrollEvents: 0,
   scrollY: 0,

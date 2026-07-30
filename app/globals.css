@@ -1,5 +1,33 @@
 @import "tailwindcss";
 
+/*
+ * ── The three tiers ────────────────────────────────────────────────────────
+ *
+ * Until pass 09 this site had two states, and the split was wrong. It keyed
+ * the stacked static fallback off prefers-reduced-motion, which meant anyone
+ * who had asked for less motion got no product at all: no card, no camera, no
+ * corridor. On Android that is close to the default, because Battery Saver
+ * forces the preference in Chrome, so most phone visitors were seeing a
+ * stripped page and concluding that was the site.
+ *
+ * The preference is about involuntary motion: things that move on their own,
+ * and things that keep moving after input stops. It is not a request to
+ * delete the visual. So:
+ *
+ *   tier 1  no-preference, WebGL works. Everything.
+ *   tier 2  reduce, WebGL works. The canvas renders and scroll still drives
+ *           the camera. What goes is the autonomous half: idle rotation, the
+ *           lamp, cursor parallax, spring lag and overshoot, cascades,
+ *           counters, autoplay, the horizontal sweep.
+ *   tier 3  WebGL unavailable. The stacked static sections, and only here.
+ *
+ * Tier 3 is a caught failure, not a media query: Stage sets data-tier on the
+ * root when the context throws. Everything structural keys off that. Anything
+ * that suppresses an animation stays on the media query, because that is
+ * correct in tier 2 and tier 3 alike.
+ */
+@custom-variant tier-static (&:where([data-tier="static"] *));
+
 :root {
   --paper: #f3f1ec;
   --paper-2: #fbfaf7;
@@ -276,7 +304,12 @@ html.lenis body {
   .animate-orbit-counter {
     animation: none !important;
   }
-  .animate-rule-draw {
-    opacity: 0;
-  }
+  /*
+   * The cue stays. With its animation off, the rule renders at full height
+   * and SCROLL sits under it at full strength, which is the finished state of
+   * a drawing that no longer draws itself. In tier 2 the hero is a real scene
+   * and the invitation to scroll is worth as much as it is in tier 1; it was
+   * only hidden before because tier 2 did not exist and there was nothing
+   * behind it.
+   */
 }

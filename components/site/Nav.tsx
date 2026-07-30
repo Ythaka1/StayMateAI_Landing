@@ -23,7 +23,7 @@ export const Nav = forwardRef<HTMLElement>(function Nav(_, ref) {
       className={[
         "pointer-events-none fixed inset-x-0 top-0 z-40",
         "flex items-center justify-between px-6 py-5 sm:px-10",
-        "opacity-0 motion-reduce:opacity-100",
+        "opacity-0 tier-static:opacity-100",
         // The bar has no fill and no border, so its type has to survive
         // whatever scrolls under it, and this site runs near-black sections
         // straight into cream ones. Difference blending against white gives

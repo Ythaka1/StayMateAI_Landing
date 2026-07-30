@@ -38,6 +38,24 @@ export const NumberBeat = forwardRef<
       started.current = true;
       const el = figureRef.current;
       if (!el) return;
+
+      /*
+       * Reduced motion: the figure, not the counting.
+       *
+       * A number rolling up from zero is autonomous by definition — it starts
+       * on a scroll position and then runs on its own clock, which is exactly
+       * what the preference is about. The beat is the figure, so the figure
+       * is what stays. It is already rendered at its final value, so this is
+       * simply declining to disturb it.
+       *
+       * Read here rather than at mount because run() fires once, on the way
+       * past, and the preference may have changed since the page loaded.
+       */
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        el.textContent = format(TARGET);
+        return;
+      }
+
       el.textContent = format(0);
       // Spring rather than a tween: it should arrive and settle, not stop
       // dead. ~1.2s, and barely any overshoot — this beat is not excitable.
@@ -58,13 +76,15 @@ export const NumberBeat = forwardRef<
       className={[
         "absolute inset-0 flex flex-col items-center justify-center px-6",
         "pointer-events-none select-none opacity-0",
-        "motion-reduce:static motion-reduce:opacity-100",
-        "motion-reduce:bg-night motion-reduce:py-28",
+        "tier-static:static tier-static:opacity-100",
+        "tier-static:bg-night tier-static:py-28",
       ].join(" ")}
       data-copy="number"
     >
-      {/* Rendered at its final value, so the reduced-motion path and the
-          server output simply print the number rather than counting it. */}
+      {/* Rendered at its final value, so the server output and the
+          reduced-motion path simply print the number rather than counting
+          it. run() is what replaces it with a zero to count from, and only
+          when it is going to count. */}
       <span
         ref={figureRef}
         className="font-display text-[clamp(3.25rem,13vw,6.5rem)] leading-none tracking-[-0.03em] text-paper tabular-nums"

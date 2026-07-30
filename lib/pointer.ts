@@ -36,17 +36,23 @@ export type PointerSpring = {
 };
 
 /**
- * Returns null where cursor parallax should not exist at all: coarse
- * pointers, and anyone who has asked for reduced motion. Null rather than a
- * spring that always reads zero, so callers have to decide what to do about
- * it rather than silently paying for listeners that can never fire.
+ * Returns null where cursor parallax cannot exist at all: coarse pointers.
+ * Null rather than a spring that always reads zero, so callers have to decide
+ * what to do about it rather than silently paying for listeners that can
+ * never fire.
+ *
+ * It no longer tests prefers-reduced-motion, though the parallax is still off
+ * in tier 2. That decision moved to Stage, onto the amplitude, because the
+ * preference can change while the page is open — Battery Saver does exactly
+ * that on Android — and a spring that was never constructed cannot come back
+ * when it does. A pointer type does not change under a running document; a
+ * media query does.
  */
 export function createPointerSpring(): PointerSpring | null {
   if (typeof window === "undefined") return null;
   // `pointer: fine` only. Never on touch, and no deviceorientation fallback:
   // a phone tilting the hero is a different effect wearing the same name.
   if (!window.matchMedia("(pointer: fine)").matches) return null;
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return null;
 
   let tx = 0;
   let ty = 0;

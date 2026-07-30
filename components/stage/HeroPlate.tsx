@@ -62,7 +62,7 @@ export const HeroPlate = forwardRef<
     <div
       ref={ref}
       aria-hidden="true"
-      className="pointer-events-none fixed inset-0 z-0 overflow-hidden bg-night opacity-0 motion-reduce:opacity-100"
+      className="pointer-events-none fixed inset-0 z-0 overflow-hidden bg-night opacity-0 tier-static:opacity-100"
       data-hero="plate"
     >
       {/* The photograph. */}

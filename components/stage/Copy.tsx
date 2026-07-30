@@ -7,16 +7,19 @@ import { BACK_FACE_LINES } from "@/lib/cardText";
  * The DOM copy for beats 1 and 2. These sit over the canvas and their opacity
  * is written imperatively from the scroll handler — no per-frame React state.
  *
- * In the reduced-motion fallback they become ordinary stacked sections ahead
- * of the panels, which is why every pinned-mode style has a motion-reduce:
- * counterpart rather than the tree being swapped out.
+ * In tier 3 — no WebGL context, so nothing behind them — they become ordinary
+ * stacked sections ahead of the panels, which is why every pinned-mode style
+ * has a tier-static: counterpart rather than the tree being swapped out.
+ * Tier 2 keeps the pin and the scroll-driven fade: there is a real scene
+ * under this copy there, and the only thing reduced motion takes away is the
+ * word-by-word cascade, which the media query handles in globals.css.
  */
 
 const layerClass = [
   "absolute inset-0 flex flex-col px-6 sm:px-10",
   "pointer-events-none select-none",
-  "motion-reduce:static motion-reduce:opacity-100 motion-reduce:bg-night",
-  "motion-reduce:py-24",
+  "tier-static:static tier-static:opacity-100 tier-static:bg-night",
+  "tier-static:py-24",
 ].join(" ");
 
 /**
@@ -44,8 +47,8 @@ export const HeroCopy = forwardRef<HTMLDivElement>(function HeroCopy(_, ref) {
       className={[
         "absolute inset-0 px-8 py-10 sm:px-14 sm:py-14",
         "pointer-events-none select-none opacity-0",
-        "motion-reduce:static motion-reduce:opacity-100",
-        "motion-reduce:min-h-[70svh] motion-reduce:py-24",
+        "tier-static:static tier-static:opacity-100",
+        "tier-static:min-h-[70svh] tier-static:py-24",
       ].join(" ")}
       data-copy="hero"
     >
@@ -66,7 +69,7 @@ export const HeroCopy = forwardRef<HTMLDivElement>(function HeroCopy(_, ref) {
           "absolute bottom-[16svh] right-8 max-w-[19rem] text-right sm:right-14",
           "animate-hero-in [animation-delay:520ms]",
           "font-body text-[0.9375rem] leading-relaxed text-paper/60",
-          "motion-reduce:static motion-reduce:mt-10 motion-reduce:text-left",
+          "tier-static:static tier-static:mt-10 tier-static:text-left",
         ].join(" ")}
       >
         A card on the desk. A concierge behind it.
@@ -90,8 +93,12 @@ export const HeroCopy = forwardRef<HTMLDivElement>(function HeroCopy(_, ref) {
  * CSS animation against a scroll-driven opacity makes the timing impossible
  * to reason about. `data-gone` is set once, from Stage, on the first input.
  *
- * Hidden entirely under reduced motion: the drawing *is* the message, and a
- * static hairline with a word under it is just a stray rule.
+ * Hidden in tier 3 only. There the hero is a stacked static section with the
+ * whole page laid out below it in normal flow, so an invitation to scroll is
+ * pointing at something already visible. In tier 2 there is a card standing
+ * on a desk and a camera waiting on the wheel, and the invitation is worth
+ * exactly what it is worth in tier 1 — it simply arrives at full height
+ * instead of drawing itself, because the media query stops the animation.
  */
 export function ScrollCue({ ref }: { ref?: React.Ref<HTMLDivElement> }) {
   return (
@@ -102,7 +109,7 @@ export function ScrollCue({ ref }: { ref?: React.Ref<HTMLDivElement> }) {
         "pointer-events-none absolute inset-x-0 bottom-[5svh]",
         "flex flex-col items-center gap-3",
         "transition-opacity duration-700 data-[gone=true]:opacity-0",
-        "motion-reduce:hidden",
+        "tier-static:hidden",
       ].join(" ")}
       data-copy="cue"
       data-gone="false"
@@ -127,7 +134,7 @@ export const DescentCopy = forwardRef<HTMLDivElement>(function DescentCopy(
   return (
     <div
       ref={ref}
-      className={`${layerClass} justify-end pb-[10svh] opacity-0 motion-reduce:justify-start`}
+      className={`${layerClass} justify-end pb-[10svh] opacity-0 tier-static:justify-start`}
       data-copy="descent"
     >
       <div className="mx-auto w-full max-w-[34rem] text-center">
@@ -148,13 +155,16 @@ export const DescentCopy = forwardRef<HTMLDivElement>(function DescentCopy(
         {/*
           The card's back, for anyone who will never see it turn.
 
-          Under reduced motion there is no WebGL at all, so the flip and the
-          line that fades onto the settled card do not exist. The line still
-          has to: it is the concierge's first reply and the point of the whole
-          beat. Set here as a quiet static block instead, in the display face,
-          the way it is set on the card itself.
+          Tier 3 only. There is no WebGL there, so the flip and the line that
+          fades onto the settled card do not exist, and the line still has to:
+          it is the concierge's first reply and the point of the whole beat.
+          Set here as a quiet static block instead, in the display face, the
+          way it is set on the card itself.
+
+          Not shown in tier 2, where the card really does turn and this would
+          be the same words twice on one screen.
         */}
-        <div className="mt-10 hidden motion-reduce:block">
+        <div className="mt-10 hidden tier-static:block">
           <p className="font-display text-[1rem] leading-snug text-paper/50">
             {BACK_FACE_LINES[0]}
           </p>
@@ -175,7 +185,7 @@ export const PullbackCopy = forwardRef<HTMLDivElement>(function PullbackCopy(
   return (
     <div
       ref={ref}
-      className={`${layerClass} justify-end pb-[9svh] opacity-0 motion-reduce:justify-start`}
+      className={`${layerClass} justify-end pb-[9svh] opacity-0 tier-static:justify-start`}
       data-copy="pullback"
     >
       <div className="mx-auto w-full max-w-[34rem] text-center">

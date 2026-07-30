@@ -65,14 +65,57 @@ import { useProperty } from "@/lib/property";
  * Nothing here preventDefaults wheel or touch; the page scrolls normally and
  * only the visual is pinned.
  *
- * Reduced motion is handled structurally in CSS (motion-reduce: variants),
- * not by swapping React trees — so there is no hydration flash and no layout
- * shift. In that path no WebGL context is created at all and the segments
- * become plain stacked dark sections.
+ * ── The three tiers (pass 09) ─────────────────────────────────────────────
+ * This used to have two states and the split was in the wrong place: the
+ * stacked static fallback was keyed off prefers-reduced-motion, so anyone who
+ * had asked for less motion got no product at all. On Android that is close
+ * to the default, because Battery Saver forces the preference in Chrome.
+ *
+ *   tier 1  no-preference, context created. Everything.
+ *   tier 2  reduce, context created. Same canvas, same timeline, same camera.
+ *           Scroll still drives all of it. What goes is the autonomous half:
+ *           the idle rotation, cursor parallax and tilt, and every spring's
+ *           lag and overshoot (see setCalm in scene.ts).
+ *   tier 3  the context could not be created. Only here do the segments
+ *           become plain stacked dark sections.
+ *
+ * Tier 3 is decided by catching the failure, never by reading a media query,
+ * and it is published as data-tier="static" on the root so the structural
+ * CSS (the tier-static: variant) can key off it. Tiers 1 and 2 create exactly
+ * one context each; tier 3 creates none.
+ *
+ * The tier is settled once, at mount. The media query is watched for live
+ * changes — Battery Saver switching on mid-visit is a real event — and the
+ * change calls scene.setCalm(). Nothing here reads the query per frame.
+ *
+ * All three are handled structurally in CSS rather than by swapping React
+ * trees, so there is no hydration flash and no layout shift.
  */
 
 /** Spacer height for a segment: its travel plus the one sticky viewport. */
 const spacerVh = (vh: number) => `${vh + 100}svh`;
+
+/**
+ * ?tier=static, which is the only tier with no other way to reach it.
+ *
+ * Tiers 1 and 2 are the motion preference, and that is switchable for real:
+ * an OS setting, or one click in the browser's own rendering panel, both of
+ * which move every part of the page at once — this scene, the CSS keyframes,
+ * the video, the counter. A URL parameter could only have forced the parts
+ * that happen to read it, which is a switch that half works, and a half
+ * working switch is worse than none.
+ *
+ * Tier 3 has no such setting: it is a context that failed to build, and short
+ * of finding a machine where that happens there is no way to see it. Hence
+ * this, and only this.
+ */
+function forcedStatic(): boolean {
+  try {
+    return new URLSearchParams(window.location.search).get("tier") === "static";
+  } catch {
+    return false;
+  }
+}
 
 /**
  * A transparent window onto the fixed canvas, with its copy pinned inside it.
@@ -96,7 +139,7 @@ function Segment({
   return (
     <div
       ref={innerRef}
-      className="relative motion-reduce:!h-auto"
+      className="relative tier-static:!h-auto"
       style={{ height: spacerVh(SEGMENTS[index].vh) }}
       data-stage={label}
     >
@@ -106,9 +149,10 @@ function Segment({
           whole failure mode impossible.
 
           No background: this is a window onto the fixed canvas behind the
-          document. The motion-reduce path has no canvas, so there it takes
-          the near-black the canvas would otherwise have cleared to. */}
-      <div className="sticky top-0 h-[100svh] overflow-clip motion-reduce:static motion-reduce:h-auto motion-reduce:overflow-visible motion-reduce:bg-night">
+          document. Tier 3 has no canvas, so there it takes the near-black the
+          canvas would otherwise have cleared to. Tier 2 does have one, and
+          keeps the pin. */}
+      <div className="sticky top-0 h-[100svh] overflow-clip tier-static:static tier-static:h-auto tier-static:overflow-visible tier-static:bg-night">
         {children}
       </div>
     </div>
@@ -140,7 +184,7 @@ export default function Stage({
   const numberRef = useRef<HTMLDivElement>(null);
   const navRef = useRef<HTMLElement>(null);
   const countRef = useRef<NumberBeatHandle>(null);
-  const reducedRef = useRef(false);
+  const staticRef = useRef(false);
 
   const [active, setActive] = useState(0);
   const activeRef = useRef(0);
@@ -180,6 +224,15 @@ export default function Stage({
     // TEMPORARY diagnostics (?debug=1). Remove with debug.ts.
     const DEBUG = debugEnabled();
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+    // See forcedStatic. Throws into the same catch a real failure lands in,
+    // rather than short-circuiting around it, so what it exercises is the
+    // actual fallback and not an imitation of it.
+    const forced = forcedStatic();
+
+    /** Tier 2. Settled here, then only ever changed by the listener below. */
+    let calm = reduced.matches;
+
     if (DEBUG) {
       stageDebug.reducedMotion = reduced.matches ? "reduce" : "no-preference";
       stageDebug.dpr = window.devicePixelRatio;
@@ -187,23 +240,36 @@ export default function Stage({
       stageDebug.clientH = canvas.clientHeight;
     }
 
-    if (reduced.matches) {
-      // No pin, no canvas at all. CSS has already laid the segments out as
-      // stacked static sections; make every panel's copy visible.
-      reducedRef.current = true;
+    let scene: CardScene;
+    try {
+      if (forced) throw new Error("?tier=static");
+      scene = createCardScene(canvas, {
+        isMobile: window.innerWidth < 768,
+        calm,
+      });
+      sceneRef.current = scene;
+    } catch (err) {
+      /*
+       * Tier 3, and the only way into it. Not a media query: a caught
+       * context-creation failure, which is the one condition that actually
+       * means this machine cannot show the scene.
+       *
+       * Publishing it on the root rather than in React state so the CSS can
+       * restyle the segments in one paint, with no second render and no
+       * layout shift. Nothing removes it — a context that failed once at
+       * mount is not going to succeed later in the same document.
+       */
+      document.documentElement.dataset.tier = "static";
+      staticRef.current = true;
       setActive(-1);
+      if (DEBUG) {
+        stageDebug.tier = forced ? "3 no context (forced)" : "3 no context";
+        stageDebug.fatal = String(err instanceof Error ? err.stack : err);
+      }
       return;
     }
 
-    let scene: CardScene;
-    try {
-      scene = createCardScene(canvas, { isMobile: window.innerWidth < 768 });
-      sceneRef.current = scene;
-    } catch (err) {
-      // Without this the page just stays dark with nothing to read.
-      if (DEBUG) stageDebug.fatal = String(err instanceof Error ? err.stack : err);
-      return;
-    }
+    if (DEBUG) stageDebug.tier = calm ? "2 calm" : "1 full";
 
     let lastApplied = "";
 
@@ -345,8 +411,10 @@ export default function Stage({
         plateLayer.style.visibility = plateVis;
       }
 
-      // How much of the pointer applies here. Retired as the descent starts.
-      parallaxAmt = 1 - within(g, PARALLAX_OUT);
+      // How much of the pointer applies here. Retired as the descent starts,
+      // and zero throughout in tier 2: the cursor is an input, but a layer
+      // that keeps sliding for a beat after the cursor stops is not.
+      parallaxAmt = calm ? 0 : 1 - within(g, PARALLAX_OUT);
 
       // The corridor segment's copy.
       setLayerOpacity(pullback, band(g, COPY_PULLBACK));
@@ -413,8 +481,11 @@ export default function Stage({
      *   lamp     3px, with the cursor
      *   camera   4px worth, with the cursor (handled inside the scene)
      *
-     * createPointerSpring returns null on coarse pointers and under reduced
-     * motion, and then none of this exists at all.
+     * createPointerSpring returns null on coarse pointers, and then none of
+     * this exists at all. It no longer tests the motion preference itself:
+     * the preference can change while the page is open, and a spring that was
+     * never built cannot come back. The gate is `calm` below, on the
+     * amplitude, which costs a comparison and survives a live toggle.
      */
     const spring = createPointerSpring();
     let parallaxRaf = 0;
@@ -456,11 +527,37 @@ export default function Stage({
     };
 
     const kick = () => {
-      if (!spring || parallaxRaf) return;
+      if (!spring || calm || parallaxRaf) return;
       lastPtrMs = 0;
       parallaxRaf = requestAnimationFrame(pump);
     };
     if (spring) window.addEventListener("pointermove", kick, { passive: true });
+
+    /*
+     * The preference, changing while the page is open.
+     *
+     * This is not a corner case on Android: Battery Saver forces reduce in
+     * Chrome, and it switches itself on at a threshold, mid-visit, while
+     * somebody is reading. The scene is not rebuilt — that would be a second
+     * context and a black frame — it is told, and it changes what it is doing
+     * on the next frame. There is exactly one context either way.
+     */
+    const onPreference = (e: MediaQueryListEvent) => {
+      if (e.matches === calm) return;
+      calm = e.matches;
+      scene.setCalm(calm);
+      if (DEBUG) {
+        stageDebug.reducedMotion = calm ? "reduce" : "no-preference";
+        stageDebug.tier = calm ? "2 calm" : "1 full";
+      }
+      // Recompute the scroll-derived values under the new tier, then write
+      // the parallax layers once so they unwind to zero rather than being
+      // left frozen wherever the cursor last put them.
+      lastApplied = "";
+      apply();
+      writeParallax();
+    };
+    reduced.addEventListener("change", onPreference);
 
     // The autonomous rotation in beat 1 ends on the user's first input and
     // never restarts — from then on scroll owns the camera entirely. The
@@ -507,6 +604,7 @@ export default function Stage({
       window.removeEventListener("wheel", onFirstInput);
       window.removeEventListener("touchstart", onFirstInput);
       window.removeEventListener("keydown", onFirstInput);
+      reduced.removeEventListener("change", onPreference);
       if (spring) {
         window.removeEventListener("pointermove", kick);
         if (parallaxRaf) cancelAnimationFrame(parallaxRaf);
@@ -534,9 +632,9 @@ export default function Stage({
    * changes every card in the corridor and the fan at once and leaves the
    * draw call count exactly where it was.
    *
-   * Under reduced motion there is no scene at all and sceneRef stays null,
-   * which is correct: the DOM cards still update, and they are the only cards
-   * that exist in that mode.
+   * In tier 3 there is no scene at all and sceneRef stays null, which is
+   * correct: the DOM cards still update, and they are the only cards that
+   * exist there. Tier 2 has a scene like any other and gets the repaint.
    */
   useEffect(() => {
     const id = window.setTimeout(() => {
@@ -559,7 +657,7 @@ export default function Stage({
    *    up stopping halfway down the page.
    */
   const focusPanel = (index: number) => {
-    if (reducedRef.current) return;
+    if (staticRef.current) return;
     const spacer = pivotSegRef.current;
     if (!spacer) return;
     const travel = spacer.offsetHeight - window.innerHeight;
@@ -610,7 +708,7 @@ export default function Stage({
       <canvas
         ref={canvasRef}
         aria-hidden="true"
-        className="pointer-events-none fixed inset-0 z-[1] block h-full w-full motion-reduce:hidden"
+        className="pointer-events-none fixed inset-0 z-[1] block h-full w-full tier-static:hidden"
       />
 
       {/* Everything that scrolls, stacked over the canvas. */}
@@ -628,11 +726,11 @@ export default function Stage({
               invisible because there is nothing at the seam. */}
           <div
             ref={layerRef}
-            className="absolute inset-0 bg-paper opacity-0 pointer-events-none motion-reduce:static motion-reduce:opacity-100 motion-reduce:pointer-events-auto"
+            className="absolute inset-0 bg-paper opacity-0 pointer-events-none tier-static:static tier-static:opacity-100 tier-static:pointer-events-auto"
           >
             <div
               ref={trackRef}
-              className="flex h-full w-[400%] will-change-transform motion-reduce:block motion-reduce:w-full motion-reduce:transform-none motion-reduce:will-change-auto"
+              className="flex h-full w-[400%] will-change-transform tier-static:block tier-static:w-full tier-static:transform-none tier-static:will-change-auto"
             >
               {PANELS.map(({ label, Body }, i) => (
                 <Panel

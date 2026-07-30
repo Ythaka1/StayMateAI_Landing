@@ -172,6 +172,67 @@ const RISE_K = 96;
 const RISE_D = 17;
 
 /**
+ * A second order spring chasing a scroll-derived target, and the one place
+ * either of this scene's two springs is integrated.
+ *
+ * ── Why calm lives in here rather than in a second code path ──────────────
+ * Tier 2 (reduced motion, WebGL available) still renders this scene and
+ * scroll still drives this camera. What it must not do is keep moving after
+ * the input stops, and that is exactly what a spring's lag and settle are.
+ * So calm does not disable the spring or bypass it: it sets the spring to
+ * instant. The value takes its target on the frame the target changes, which
+ * is the same mapping the tier 1 spring converges to, without the interval in
+ * between.
+ *
+ * Both tiers therefore run this function, on the same targets, from the same
+ * timeline, in the same order. A separate "reduced" path would be a second
+ * set of numbers to keep in step with the first, and it would drift.
+ */
+interface Spring {
+  /** Current value. */
+  v: number;
+  vel: number;
+  /** performance.now() at the last step, for the real dt. */
+  ms: number;
+  /** True while it still has somewhere to go. Always false when calm. */
+  settling: boolean;
+}
+
+const makeSpring = (v = 0): Spring => ({ v, vel: 0, ms: 0, settling: false });
+
+function stepSpring(
+  s: Spring,
+  target: number,
+  k: number,
+  d: number,
+  nowMs: number,
+  calm: boolean
+) {
+  if (calm) {
+    s.v = target;
+    s.vel = 0;
+    // Kept current so that switching out of calm mid-page integrates from now
+    // rather than from whenever the spring last ran, which would be one very
+    // large dt and a visible kick.
+    s.ms = nowMs;
+    s.settling = false;
+    return;
+  }
+
+  // Clamped: a backgrounded tab hands back a dt measured in seconds, and an
+  // unclamped second order system integrated over that goes unstable.
+  const dt = Math.min(s.ms ? (nowMs - s.ms) / 1000 : 1 / 60, 1 / 30);
+  s.ms = nowMs;
+  s.vel += (k * (target - s.v) - d * s.vel) * dt;
+  s.v += s.vel * dt;
+  s.settling = Math.abs(target - s.v) > 1e-4 || Math.abs(s.vel) > 1e-4;
+  if (!s.settling) {
+    s.v = target;
+    s.vel = 0;
+  }
+}
+
+/**
  * Where the camera stands while the card is flat, in card units.
  *
  * The flat card's centre is at (0, -CARD_H/2, -CARD_H/2), so this looks down
@@ -502,6 +563,24 @@ export interface CardScene {
    * handoff depends on.
    */
   setPointer(x: number, y: number, amount: number): void;
+
+  /**
+   * Tier 2: the same scene, without the autonomous half.
+   *
+   * Calm removes motion the visitor did not ask for — the idle rotation, and
+   * the lag and overshoot of both springs, which are motion that continues
+   * after the input has stopped. It does not remove the scene: scroll still
+   * drives the camera, the card still rises, flips, dollies and pivots, and
+   * the corridor and the fan are unchanged. The two tiers run one timeline
+   * and one camera; only the spring constants and the autonomous terms
+   * differ. There is no second path to keep in step.
+   *
+   * Safe to call at any time, including while the loop is running, because
+   * the springs assign their targets rather than being re-tuned mid-flight.
+   * Idempotent.
+   */
+  setCalm(next: boolean): void;
+
   /** Idempotent. Renders one frame immediately, then keeps the loop alive. */
   start(): void;
   /** Idempotent. Fully stops the RAF loop — not just an opacity-0 canvas. */
@@ -511,9 +590,19 @@ export interface CardScene {
 
 export function createCardScene(
   canvas: HTMLCanvasElement,
-  opts: { isMobile: boolean }
+  opts: { isMobile: boolean; calm?: boolean }
 ): CardScene {
   const { isMobile } = opts;
+  /*
+   * Tier 2. See stepSpring, and setCalm below.
+   *
+   * `let`, not a constant folded through the scene at construction, because
+   * the preference can change while the page is open — Battery Saver kicking
+   * in on Android does exactly that — and rebuilding the context on a media
+   * query change would be a second context and a black frame. Read once per
+   * applyProgress, never inside the render loop's own condition.
+   */
+  let calm = opts.calm === true;
 
   /*
    * Transparent, since pass 06. The hero is a photographed desk in DOM behind
@@ -910,8 +999,9 @@ export function createCardScene(
   let running = false;
   let raf = 0;
 
-  // Beat 1's autonomous rotation — the only autonomous motion in the site.
-  let introAmp = 1;
+  // Beat 1's autonomous rotation — the only autonomous motion in the site,
+  // and so the first thing tier 2 gives up. Zero from construction when calm.
+  let introAmp = calm ? 0 : 1;
   let introReleasedAt = 0;
 
   // Spring damped pointer, written from Stage. -1..1 from the centre of the
@@ -929,18 +1019,16 @@ export function createCardScene(
    * lags the scroll on the way over and settles past the landing, which is
    * what a stiff card actually does when it is dropped. Underdamped on
    * purpose, but only just: the overshoot is a few degrees.
+   *
+   * When calm, the same spring runs instant (see stepSpring) and the turn is
+   * the rigid mapping described above — which is precisely what tier 2 wants,
+   * because the objection to motion is motion that outlives the input.
    */
-  let flipAngle = 0;
-  let flipVel = 0;
-  let flipMs = 0;
-  let flipSettling = false;
+  const flip = makeSpring();
 
   /** The rise, on its own spring. Stiffer than the flip: a card coming up
    *  off a desk is shorter and heavier than one turning over in the air. */
-  let riseT = 0;
-  let riseVel = 0;
-  let riseMs = 0;
-  let riseSettling = false;
+  const rise = makeSpring();
 
   /** Whether card 0's instance matrix is currently identity. */
   let heroIsIdentity = false;
@@ -1073,18 +1161,8 @@ export function createCardScene(
      * handoff was measured on.
      */
     const riseTarget = g >= DESCENT.end ? 1 : easeInOutCubic(within(g, RISE));
-    {
-      const dt = Math.min(riseMs ? (nowMs - riseMs) / 1000 : 1 / 60, 1 / 30);
-      riseMs = nowMs;
-      riseVel += (RISE_K * (riseTarget - riseT) - RISE_D * riseVel) * dt;
-      riseT += riseVel * dt;
-      riseSettling =
-        Math.abs(riseTarget - riseT) > 1e-4 || Math.abs(riseVel) > 1e-4;
-      if (!riseSettling) {
-        riseT = riseTarget;
-        riseVel = 0;
-      }
-    }
+    stepSpring(rise, riseTarget, RISE_K, RISE_D, nowMs, calm);
+    const riseT = rise.v;
 
     const cardPos = cardAt(riseT);
     mesh.position.set(0, cardPos.y, cardPos.z);
@@ -1116,24 +1194,14 @@ export function createCardScene(
      * room numbers are printed on the front.
      */
     const flipTarget = Math.PI * easeInOutCubic(within(g, FLIP));
-    {
-      const dt = Math.min(flipMs ? (nowMs - flipMs) / 1000 : 1 / 60, 1 / 30);
-      flipMs = nowMs;
-      flipVel += (FLIP_K * (flipTarget - flipAngle) - FLIP_D * flipVel) * dt;
-      flipAngle += flipVel * dt;
-      flipSettling =
-        Math.abs(flipTarget - flipAngle) > 1e-4 || Math.abs(flipVel) > 1e-4;
-      if (!flipSettling) {
-        flipAngle = flipTarget;
-        flipVel = 0;
-      }
-    }
-    const flip = g <= PIVOT.end ? flipAngle : 0;
+    stepSpring(flip, flipTarget, FLIP_K, FLIP_D, nowMs, calm);
+    const flipRot = g <= PIVOT.end ? flip.v : 0;
 
     // Cursor tilt, on top of the idle rather than instead of it, and scaled
     // by the same amount that retires the parallax. Both are gone by the time
-    // the card has finished coming up.
-    mesh.rotation.y = idleY + flip - ptrX * TILT_Y * ptrAmt;
+    // the card has finished coming up. In tier 2 Stage holds ptrAmt at zero,
+    // so both terms vanish without a branch here.
+    mesh.rotation.y = idleY + flipRot - ptrX * TILT_Y * ptrAmt;
     mesh.rotation.x = cardPos.tilt + ptrY * TILT_X * ptrAmt;
 
     u.uBackReveal.value = within(g, BACK_INK);
@@ -1320,7 +1388,7 @@ export function createCardScene(
     // While the intro rotation is alive, or the flip spring is still on its
     // way to where scroll has asked it to be, the scene is time-driven and
     // every frame is dirty. Once both are done we are back to scroll-driven.
-    if (introAmp > 0 || flipSettling || riseSettling) dirty = true;
+    if (introAmp > 0 || flip.settling || rise.settling) dirty = true;
     if (dirty) render(nowMs);
   }
 
@@ -1344,6 +1412,27 @@ export function createCardScene(
       ptrY = y;
       ptrAmt = amount;
       dirty = true;
+    },
+    setCalm(next: boolean) {
+      if (next === calm) return;
+      calm = next;
+      if (calm) {
+        // The idle is autonomous by definition, so it goes, and it does not
+        // come back if the preference is turned off again: it is beat one's
+        // welcome, released on the first input and never restarted, and
+        // resurrecting it under a card that is already halfway up would be a
+        // stranger thing than losing it.
+        introAmp = 0;
+        // Cursor parallax and tilt, to zero. Stage stops feeding the pointer
+        // too, but the layers must not be left frozen at their last offset.
+        ptrX = 0;
+        ptrY = 0;
+        ptrAmt = 0;
+      }
+      // The next applyProgress assigns both springs to their scroll targets,
+      // so nothing has to be unwound here.
+      dirty = true;
+      if (!running) render(performance.now());
     },
     setSize(width: number, height: number) {
       renderer.setSize(width, height, false);

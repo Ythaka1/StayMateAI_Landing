@@ -38,6 +38,7 @@ export default function DebugOverlay() {
         `sized    ${d.sized}   pixelRatio ${d.pixelRatio}`,
         `dpr      ${d.dpr}`,
         `reduced  ${d.reducedMotion}`,
+        `tier     ${d.tier}`,
         `progress ${d.progress.toFixed(3)}`,
         `scroll   y=${d.scrollY}  events=${d.scrollEvents}`,
         `spacer   top=${d.spacerTop} h=${d.spacerH}`,
