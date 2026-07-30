@@ -1,17 +1,22 @@
 /*
  * The three ways this site reaches a person.
  *
- * ── SWAP SEAM ─────────────────────────────────────────────────────────────
- * WHATSAPP_NUMBER is the placeholder. Replace it with the property-facing
- * number in full international form, digits only, no plus and no spaces
- * (wa.me will not accept anything else). Nothing else needs to change: every
- * button and link on the page reads from here.
+ * ── The WhatsApp number ───────────────────────────────────────────────────
+ * Full international form, digits only, no plus and no spaces: wa.me will
+ * not accept anything else, and a wa.me link with a leading plus or a space
+ * in it resolves to a page that says the number is invalid rather than
+ * failing visibly at build time.
+ *
+ * Every WhatsApp button on the site reads from here — the nav, the plans
+ * table, the pilot, the footer — so this is the only line to change if the
+ * number ever moves. It carried a placeholder (10000000000) from pass 04
+ * until now, which meant every one of those buttons reached nobody.
+ *
+ * Same subscriber as CONTACT_PHONE_HREF below, written the way each
+ * destination wants it. If one changes, change both.
  * ──────────────────────────────────────────────────────────────────────────
  */
-export const WHATSAPP_NUMBER = "10000000000";
-
-/** True while the placeholder is still in place. Used to mark it in dev. */
-export const WHATSAPP_IS_PLACEHOLDER = WHATSAPP_NUMBER === "10000000000";
+export const WHATSAPP_NUMBER = "254704925908";
 
 const message = "I'd like to book a StayMate demo.";
 
